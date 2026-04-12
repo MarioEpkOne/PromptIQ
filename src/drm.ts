@@ -486,6 +486,14 @@ export function buildHistoryContext(): string {
 /**
  * Returns DRM summary data for display in `status` and `patterns` commands.
  */
+export function getWeeklyDetail(week: string): WeeklyRecord | null {
+  return readWeekly(week);
+}
+
+export function getMonthlyDetail(month: string): MonthlyRecord | null {
+  return readMonthly(month);
+}
+
 export function getDrmSummary(): {
   weeklyFiles: WeeklyRecord[];
   monthlyFiles: MonthlyRecord[];
