@@ -73,10 +73,10 @@ None. This is a TypeScript CLI project with no MCP/runtime verification concerns
 
 ### Error 2: `buildHistoryContext` test does not cover monthly summary path
 - **Category**: `INCOMPLETE_TASK`
-- **File(s)**: `/mnt/c/Users/Epkone/promptiq/.claude/worktrees/12-factor-improvements/src/test/drm.test.ts`
+- **File(s)**: `src/test/drm.test.ts`
 - **What broke**: Spec test table requires "buildHistoryContext() includes monthly + weekly entries." The test only writes a weekly file; the `### Monthly summaries` section of `buildHistoryContext` output is never exercised in tests.
 - **Evidence**: drm.test.ts:132-159 — only `weeklyDir` file written; no assertion on `Monthly summaries`.
-- **Suggested fix**: Extend the existing test `buildHistoryContext includes weekly entry when weekly file exists` (or add a sibling test) to also write a monthly JSON file into `monthlyDir` and assert the output contains `### Monthly summaries` and the monthly record fields (`promptCount`, `avgScore`, `summary`).
+- **Suggested fix**: Extend the existing test to also write a monthly JSON file into `monthlyDir` and assert the output contains `### Monthly summaries` and the monthly record fields (`promptCount`, `avgScore`, `summary`).
 
 **Not actionable (requires human judgment or play-mode verification):**
 - The `upsertErrorInWeekly` compressed-week guard (returns without writing when week is already compressed) is a reasonable implementation choice not explicitly spec'd. The spec only requires the guard against overwriting a successful daily-detail entry. This is not an error but a design decision the implementer made; no change is required.
@@ -92,7 +92,7 @@ None. All CLAUDE.md hard rules were observed:
 - DRM invariant preserved (`upsertErrorInWeekly` does not delete daily file)
 
 ## Task Completeness
-- **Unchecked items**: None listed in the working log Post-Implementation Checklist (working log does not use a formal checklist, but all verification items are marked as confirmed)
+- **Unchecked items**: None listed in the working log Post-Implementation Checklist
 - **De-facto unchecked**: `npm run build` exits 0 — explicitly failed and acknowledged
 
 ---
@@ -122,3 +122,30 @@ Copy-paste these into learnings.md under the relevant section:
 
 - 2026-04-12 [12-factor-improvements]: When a spec test table says "includes X + Y entries," write a test that actually seeds and asserts both X and Y data paths. A test that only covers one of the two listed inputs is incomplete coverage. → impl.md testing section
 ```
+
+---
+
+## Re-Audit (after fix loop 1)
+**Date**: 2026-04-13
+**Status**: COMPLETE (with one deferred build caveat)
+
+### What the fixer did
+- **Error 1** (`dist/cli.js` stale): Deferred — WSL build is a pre-existing limitation documented in CLAUDE.md. No change made.
+- **Error 2** (`buildHistoryContext` monthly test gap): Fixed — extended `buildHistoryContext includes weekly entry when weekly file exists` in `src/test/drm.test.ts` to seed a monthly file and assert `### Monthly summaries`, `2026-03`, `150 prompts`, and `0.68` appear in output.
+
+### Updated Goals — Static Verification
+
+| Goal | Status | Evidence |
+|---|---|---|
+| `buildHistoryContext` monthly path covered by test | APPEARS MET | drm.test.ts:154-178: monthly file seeded; `### Monthly summaries`, `2026-03`, `150 prompts`, `0.68` all asserted |
+| All other goals | unchanged — still APPEARS MET (see above) | |
+| Build exits 0 | APPEARS UNMET | WSL pre-existing issue, deferred — see Error 1 above |
+
+### Test Suite
+All 33 tests pass (22 original + 11 new), 0 failures. Lint: `npm run lint` exits 0.
+
+### Remaining Actionable Errors
+
+**Error 1: `dist/cli.js` not updated** — still open. Build on a non-WSL machine and commit the updated binary before this branch is considered fully shipped.
+
+**Error 2**: RESOLVED.
