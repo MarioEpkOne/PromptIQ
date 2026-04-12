@@ -124,6 +124,13 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
     let selectedDetailKey = null;
 
+    // Delegated click handler on stable parent — avoids inline onclick escaping issues
+    document.getElementById('tab-patterns').addEventListener('click', function(e) {
+      const row = e.target.closest('tr.clickable');
+      if (row) { toggleDetail(row.dataset.type, row.dataset.id, row); return; }
+      if (e.target.closest('.detail-close')) { closeDetail(); }
+    });
+
     async function loadPatterns() {
       const el = document.getElementById('tab-patterns');
       try {
@@ -136,8 +143,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
             html += '<h3 style="color:#888;font-size:12px;margin-bottom:8px;">WEEKLY</h3><table><tr><th>Week</th><th>Score</th><th>Prompts</th><th>Detail</th><th style="color:#5bc8f5;font-size:11px;">&#9654; view</th></tr>';
             for (const w of data.weekly.slice().reverse()) {
               const detail = w.detail === 'compressed' ? 'compressed' : 'daily';
-              const key = 'week:' + w.week;
-              html += '<tr class="clickable" data-key="' + key + '" onclick="toggleDetail(\'week\',\'' + w.week + '\',this)">'
+              html += '<tr class="clickable" data-type="week" data-id="' + w.week + '">'
                 + '<td>' + w.week + '</td><td>' + scoreBadge(w.avgScore || 0) + '</td><td>' + (w.promptCount || '\u2014') + '</td>'
                 + '<td style="color:#666;font-size:12px;">' + detail + '</td>'
                 + '<td style="color:#5bc8f5;font-size:12px;">&#9654;</td></tr>';
@@ -147,23 +153,19 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           if (data.monthly && data.monthly.length > 0) {
             html += '<h3 style="color:#888;font-size:12px;margin-bottom:8px;">MONTHLY</h3><table><tr><th>Month</th><th>Score</th><th>Prompts</th><th>Weeks</th><th style="color:#5bc8f5;font-size:11px;">&#9654; view</th></tr>';
             for (const m of data.monthly.slice().reverse()) {
-              html += '<tr class="clickable" data-key="month:' + m.month + '" onclick="toggleDetail(\'month\',\'' + m.month + '\',this)">'
+              html += '<tr class="clickable" data-type="month" data-id="' + m.month + '">'
                 + '<td>' + m.month + '</td><td>' + scoreBadge(m.avgScore) + '</td><td>' + m.promptCount + '</td><td>' + m.weekCount + '</td>'
                 + '<td style="color:#5bc8f5;font-size:12px;">&#9654;</td></tr>';
             }
             html += '</table>';
           }
         }
-        // preserve detail panel
-        const panel = document.getElementById('detail-panel');
-        const savedPanel = panel ? panel.outerHTML : '';
         el.innerHTML = html + '<div id="detail-panel" style="display:none;"></div>';
-        if (savedPanel && savedPanel.includes('class="detail-panel"')) {
-          document.getElementById('detail-panel').outerHTML = savedPanel;
-        }
-        // re-highlight selected row
+        // re-highlight selected row and restore panel if open
         if (selectedDetailKey) {
-          const row = el.querySelector('[data-key="' + selectedDetailKey + '"]');
+          const [type, ...rest] = selectedDetailKey.split(':');
+          const id = rest.join(':');
+          const row = el.querySelector('[data-type="' + type + '"][data-id="' + id + '"]');
           if (row) row.classList.add('selected');
         }
       } catch (e) {
@@ -174,10 +176,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     async function toggleDetail(type, id, row) {
       const key = type + ':' + id;
       const panel = document.getElementById('detail-panel');
-      // Deselect all rows
       document.querySelectorAll('#tab-patterns tr.selected').forEach(r => r.classList.remove('selected'));
       if (selectedDetailKey === key) {
-        // toggle off
         selectedDetailKey = null;
         panel.style.display = 'none';
         panel.innerHTML = '';
@@ -186,16 +186,16 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       selectedDetailKey = key;
       row.classList.add('selected');
       panel.style.display = 'block';
-      panel.innerHTML = '<div class="detail-panel"><span class="detail-close" onclick="closeDetail()">&#x2715;</span><h4>Loading\u2026</h4></div>';
+      panel.innerHTML = '<div class="detail-panel"><span class="detail-close">&#x2715;</span><h4>Loading\u2026</h4></div>';
       try {
         const data = await fetch('/api/detail?type=' + type + '&id=' + encodeURIComponent(id)).then(r => r.json());
         if (data.error) {
-          panel.innerHTML = '<div class="detail-panel"><span class="detail-close" onclick="closeDetail()">&#x2715;</span><p class="empty">No detail available.</p></div>';
+          panel.innerHTML = '<div class="detail-panel"><span class="detail-close">&#x2715;</span><p class="empty">No detail available.</p></div>';
           return;
         }
         panel.innerHTML = '<div class="detail-panel">' + renderDetail(type, id, data) + '</div>';
       } catch (e) {
-        panel.innerHTML = '<div class="detail-panel"><span class="detail-close" onclick="closeDetail()">&#x2715;</span><p class="empty">Failed to load detail.</p></div>';
+        panel.innerHTML = '<div class="detail-panel"><span class="detail-close">&#x2715;</span><p class="empty">Failed to load detail.</p></div>';
       }
     }
 
@@ -212,7 +212,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     }
 
     function renderDetail(type, id, data) {
-      let html = '<span class="detail-close" onclick="closeDetail()">&#x2715;</span>';
+      let html = '<span class="detail-close">&#x2715;</span>';
       html += '<h4>' + escHtml(id) + ' &mdash; Top Findings</h4>';
       if (type === 'week') {
         if (data.detail === 'compressed') {
