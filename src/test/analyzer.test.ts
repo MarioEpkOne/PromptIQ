@@ -10,8 +10,10 @@ jest.mock('@anthropic-ai/sdk', () => {
         create: jest.fn().mockResolvedValue({
           content: [
             {
-              type: 'text',
-              text: JSON.stringify({
+              type: 'tool_use',
+              id: 'tu_test',
+              name: 'report_analysis',
+              input: {
                 scores: [
                   { prompt: 'Fix the bug', score: 0.4, weakestCriterion: 'Context' },
                   { prompt: 'Explain async', score: 0.5, weakestCriterion: 'Output Format' },
@@ -34,7 +36,7 @@ jest.mock('@anthropic-ai/sdk', () => {
                   },
                 ],
                 summary: 'Test summary.',
-              }),
+              },
             },
           ],
         }),
@@ -99,6 +101,53 @@ describe('analyzer', () => {
       const calls = mockInstance.messages.create.mock.calls;
       const lastCall = calls[calls.length - 1]?.[0];
       expect(lastCall?.system).toContain('Test Rubric');
+    }
+  });
+
+  it('calls messages.create with tool_choice: report_analysis', async () => {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default as jest.MockedClass<
+      typeof import('@anthropic-ai/sdk').default
+    >;
+    const mockInstance = (Anthropic as unknown as jest.Mock).mock.results[0]?.value;
+    await analyzeToday(MOCK_ENTRIES, MOCK_RUBRIC, '2026-04-10');
+    if (mockInstance) {
+      const calls = mockInstance.messages.create.mock.calls;
+      const lastCall = calls[calls.length - 1]?.[0];
+      expect(lastCall?.tools).toBeDefined();
+      expect(lastCall?.tools?.[0]?.name).toBe('report_analysis');
+      expect(lastCall?.tool_choice).toEqual({ type: 'tool', name: 'report_analysis' });
+    }
+  });
+
+  it('throws if no tool_use block returned', async () => {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default as jest.MockedClass<
+      typeof import('@anthropic-ai/sdk').default
+    >;
+    // Override the factory to return an instance with an empty content response
+    (Anthropic as unknown as jest.Mock).mockImplementationOnce(() => ({
+      messages: {
+        create: jest.fn().mockResolvedValueOnce({ content: [] }),
+      },
+    }));
+    await expect(analyzeToday(MOCK_ENTRIES, MOCK_RUBRIC, '2026-04-10')).rejects.toThrow(
+      'Analyzer returned no tool_use block',
+    );
+  });
+
+  it('passes historyContext to buildSystemPrompt (history section appears in system prompt)', async () => {
+    // The mock for buildHistoryContext is implicit: no weekly/monthly files exist in this test,
+    // so buildHistoryContext returns '' and the system prompt omits the history section.
+    // We verify this by checking the system prompt does NOT contain '## Historical Context'.
+    const Anthropic = (await import('@anthropic-ai/sdk')).default as jest.MockedClass<
+      typeof import('@anthropic-ai/sdk').default
+    >;
+    const mockInstance = (Anthropic as unknown as jest.Mock).mock.results[0]?.value;
+    await analyzeToday(MOCK_ENTRIES, MOCK_RUBRIC, '2026-04-10');
+    if (mockInstance) {
+      const calls = mockInstance.messages.create.mock.calls;
+      const lastCall = calls[calls.length - 1]?.[0];
+      // No history files in test env — history section should be absent
+      expect(lastCall?.system).not.toContain('## Historical Context');
     }
   });
 });

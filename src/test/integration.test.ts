@@ -10,8 +10,10 @@ jest.mock('@anthropic-ai/sdk', () => ({
       create: jest.fn().mockResolvedValue({
         content: [
           {
-            type: 'text',
-            text: JSON.stringify({
+            type: 'tool_use',
+            id: 'tu_int_test',
+            name: 'report_analysis',
+            input: {
               scores: [
                 { prompt: 'Prompt A', score: 0.6, weakestCriterion: 'Clarity' },
                 { prompt: 'Prompt B', score: 0.7, weakestCriterion: 'Context' },
@@ -22,7 +24,7 @@ jest.mock('@anthropic-ai/sdk', () => ({
                 { patternId: 'test-pattern', text: 'Be more specific', before: 'Prompt A', after: 'Detailed Prompt A' },
               ],
               summary: 'Integration test summary.',
-            }),
+            },
           },
         ],
       }),

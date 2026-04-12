@@ -126,6 +126,17 @@ export function renderStatus(
   weeklyFiles: WeeklyRecord[],
   monthlyFiles: MonthlyRecord[],
 ): void {
+  // Collect all days with error === true from daily-detail weekly files
+  const failedDates: string[] = [];
+  for (const w of weeklyFiles) {
+    if (w.detail === 'daily') {
+      for (const [date, d] of Object.entries((w as WeeklyRecordDaily).days)) {
+        if (d.error) failedDates.push(date);
+      }
+    }
+  }
+  failedDates.sort();
+
   console.log('');
   console.log(chalk.bold('PromptIQ Status'));
   console.log(DIVIDER);
@@ -135,6 +146,11 @@ export function renderStatus(
   );
   console.log(`  Weekly summaries stored: ${chalk.bold(String(weeklyFiles.length))}`);
   console.log(`  Monthly summaries stored: ${chalk.bold(String(monthlyFiles.length))}`);
+  if (failedDates.length > 0) {
+    console.log(
+      `  ${chalk.yellow('⚠')} ${chalk.yellow(`${failedDates.length} day${failedDates.length === 1 ? '' : 's'} failed to analyze`)}: ${failedDates.join(', ')}`,
+    );
+  }
   console.log('');
 }
 

@@ -129,16 +129,23 @@ export function deleteDailyFile(date: string): void {
  * Reads prompt from stdin, appends as JSON line to today's daily file.
  * Fast: no API calls, disk write only.
  */
-export async function runLog(): Promise<void> {
+export async function runLog(filePath?: string): Promise<void> {
   ensureDirectories();
 
-  // Read all stdin
-  const rl = readline.createInterface({ input: process.stdin, terminal: false });
-  const lines: string[] = [];
-  for await (const line of rl) {
-    lines.push(line);
+  let prompt: string;
+
+  if (filePath) {
+    // Read prompt from file; fs.readFileSync throws if file not found (caught by caller)
+    prompt = fs.readFileSync(filePath, 'utf-8').trim();
+  } else {
+    // Read all stdin (original hook path)
+    const rl = readline.createInterface({ input: process.stdin, terminal: false });
+    const lines: string[] = [];
+    for await (const line of rl) {
+      lines.push(line);
+    }
+    prompt = lines.join('\n').trim();
   }
-  const prompt = lines.join('\n').trim();
 
   if (!prompt) return; // Nothing to log
 
@@ -147,6 +154,6 @@ export async function runLog(): Promise<void> {
     prompt,
   };
 
-  const filePath = todayLogPath();
-  fs.appendFileSync(filePath, JSON.stringify(entry) + '\n', 'utf-8');
+  const logPath = todayLogPath();
+  fs.appendFileSync(logPath, JSON.stringify(entry) + '\n', 'utf-8');
 }
