@@ -156,6 +156,58 @@ export function upsertDayInWeekly(analysis: DayAnalysis): void {
 }
 
 /**
+ * Writes an error record into the weekly file for a given date.
+ * Does NOT overwrite an existing successful analysis entry.
+ * Called from cli.ts catch block when analyzeToday() throws.
+ */
+export function upsertErrorInWeekly(
+  date: string,
+  promptCount: number,
+  errorType: string,
+  errorMessage: string,
+): void {
+  const week = isoWeekLabel(date);
+  const bounds = weekBounds(date);
+  const existing = readWeekly(week);
+
+  const errorRecord: WeekDayRecord = {
+    promptCount,
+    avgScore: 0,
+    topPatterns: [],
+    summary: '',
+    error: true,
+    errorType,
+    errorMessage,
+  };
+
+  if (!existing || existing.detail === 'daily') {
+    const record: WeeklyRecordDaily =
+      existing && existing.detail === 'daily'
+        ? { ...(existing as WeeklyRecordDaily) }
+        : {
+            week,
+            startDate: bounds.startDate,
+            endDate: bounds.endDate,
+            detail: 'daily',
+            days: {},
+          };
+
+    // Guard: do not overwrite a successful analysis
+    const existing_day = record.days[date];
+    if (existing_day && !existing_day.error) {
+      return; // successful entry present — do not overwrite
+    }
+
+    record.days[date] = errorRecord;
+    writeWeekly(record);
+  } else {
+    // Compressed — only add error record if the date is not already captured.
+    // A compressed week implies prior successful analysis, so do nothing.
+    return;
+  }
+}
+
+/**
  * Returns the ISO week label for "the most recent full week" (last complete Monday–Sunday).
  */
 function mostRecentFullWeek(): string {
@@ -379,6 +431,56 @@ export async function runRollup(): Promise<void> {
     writeMonthly(monthly);
     fs.unlinkSync(weeklyPath(week));
   }
+}
+
+/**
+ * Builds a historical context string from all available DRM data.
+ * Returns empty string if no history exists (first run).
+ * Called by analyzeToday() to inject trend context into the system prompt.
+ */
+export function buildHistoryContext(): string {
+  const { weeklyFiles, monthlyFiles } = getDrmSummary();
+
+  if (weeklyFiles.length === 0 && monthlyFiles.length === 0) {
+    return '';
+  }
+
+  const lines: string[] = ['## Historical Context', ''];
+
+  if (monthlyFiles.length > 0) {
+    lines.push('### Monthly summaries');
+    for (const m of monthlyFiles.slice().reverse()) {
+      lines.push(
+        `- ${m.month}: ${m.promptCount} prompts, avg score ${m.avgScore.toFixed(2)} — ${m.summary || '(no summary)'}`,
+      );
+    }
+    lines.push('');
+  }
+
+  if (weeklyFiles.length > 0) {
+    lines.push('### Weekly summaries (recent)');
+    for (const w of weeklyFiles.slice().reverse()) {
+      if (w.detail === 'compressed') {
+        lines.push(
+          `- ${w.week} (${w.startDate} – ${w.endDate}): ${w.promptCount} prompts, avg score ${w.avgScore.toFixed(2)} — ${w.summary || '(no summary)'}`,
+        );
+      } else {
+        const daily = w as WeeklyRecordDaily;
+        const days = Object.entries(daily.days)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(
+            ([date, d]) =>
+              `  - ${date}: ${d.promptCount} prompts, avg score ${d.avgScore.toFixed(2)}${d.error ? ' [FAILED]' : ''}`,
+          )
+          .join('\n');
+        lines.push(`- ${w.week} (${w.startDate} – ${w.endDate}):`);
+        lines.push(days);
+      }
+    }
+    lines.push('');
+  }
+
+  return lines.join('\n');
 }
 
 /**

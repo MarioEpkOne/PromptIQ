@@ -57,6 +57,10 @@ export interface WeekDayRecord {
   avgScore: number;
   topPatterns: string[];
   summary: string;
+  // Error fields (only present when analysis failed)
+  error?: boolean;
+  errorType?: string;
+  errorMessage?: string;
 }
 
 // Weekly DRM record with daily breakdown (most recent full week)

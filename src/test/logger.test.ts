@@ -85,4 +85,33 @@ describe('logger', () => {
     expect(entry.prompt).toBe('Hello world prompt');
     expect(entry.timestamp).toBeTruthy();
   });
+
+  it('runLog(filePath) reads prompt from file when path provided', async () => {
+    jest.resetModules();
+    const { ensureDirectories, todayLogPath } = await import('../logger.js');
+    ensureDirectories();
+
+    // Write a temp file with a prompt
+    const promptFile = path.join(tempDir, 'test-prompt.txt');
+    fs.writeFileSync(promptFile, 'Prompt from file\n', 'utf-8');
+
+    const { runLog } = await import('../logger.js');
+    await runLog(promptFile);
+
+    const filePath = todayLogPath();
+    expect(fs.existsSync(filePath)).toBe(true);
+    const line = fs.readFileSync(filePath, 'utf-8').trim();
+    const entry = JSON.parse(line);
+    expect(entry.prompt).toBe('Prompt from file');
+    expect(entry.timestamp).toBeTruthy();
+  });
+
+  it('runLog(filePath) throws when file does not exist', async () => {
+    jest.resetModules();
+    const { ensureDirectories } = await import('../logger.js');
+    ensureDirectories();
+
+    const { runLog } = await import('../logger.js');
+    await expect(runLog('/nonexistent/path/prompt.txt')).rejects.toThrow();
+  });
 });

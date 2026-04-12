@@ -5,7 +5,7 @@ import * as path from 'path';
 import { runLog, readTodayEntries, ensureDirectories } from './logger.js';
 import { loadRubric, copyDefaultRubric, rubricPath } from './rubric.js';
 import { analyzeToday } from './analyzer.js';
-import { runRollup, upsertDayInWeekly, getDrmSummary, isoWeekLabel } from './drm.js';
+import { runRollup, upsertDayInWeekly, upsertErrorInWeekly, getDrmSummary, isoWeekLabel } from './drm.js';
 import {
   renderAnalysis,
   renderStatus,
@@ -30,10 +30,11 @@ program
 // ---------------------------------------------------------------------------
 const logCommand = new Command('log')
   .description('Log a prompt from stdin (called by Claude Code hook — not for manual use)')
+  .option('--file <path>', 'Read prompt from file instead of stdin')
   .addHelpText('after', '\nNote: This command is intended to be called by the Claude Code hook system.')
-  .action(async () => {
+  .action(async (options: { file?: string }) => {
     try {
-      await runLog();
+      await runLog(options.file);
     } catch (err) {
       // Silent failure — must not block Claude Code
       process.stderr.write(`promptiq log error: ${String(err)}\n`);
@@ -74,7 +75,15 @@ program
       analysis = await analyzeToday(entries, rubric, today);
     } catch (err) {
       // Do NOT delete today's daily file — preserve for retry
-      console.error(`Analysis failed: ${String(err)}`);
+      const errorMessage = String(err);
+      const errorType = err instanceof Error ? err.constructor.name : 'UnknownError';
+      // Write structured error record so `promptiq status` can surface failed days
+      try {
+        upsertErrorInWeekly(today, entries.length, errorType, errorMessage);
+      } catch {
+        // If error record write fails, still proceed to exit
+      }
+      console.error(`Analysis failed: ${errorMessage}`);
       process.exit(1);
     }
 

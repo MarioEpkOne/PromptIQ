@@ -1,47 +1,20 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { LogEntry, Rubric, DayAnalysis, PromptScore, Pattern, Suggestion } from './types.js';
+import { buildHistoryContext } from './drm.js';
 
 /**
  * Builds the system prompt for the Anthropic API call.
  * Includes the full rubric text so the LLM has a stable reference point.
+ * Optionally includes historical context from DRM.
  */
-function buildSystemPrompt(rubric: Rubric): string {
+function buildSystemPrompt(rubric: Rubric, historyContext: string): string {
+  const historySec = historyContext ? `\n${historyContext}\n` : '';
   return `You are PromptIQ, a prompt quality analyzer. Your job is to evaluate prompts sent to an AI coding assistant.
 
 You will be given a batch of prompts and a rubric. Evaluate each prompt against the rubric criteria, identify recurring patterns, and suggest improvements.
 
 ## Rubric
-${rubric.rawText}
-
-## Response Format
-Respond with ONLY valid JSON matching this exact structure. No prose, no markdown fences, just the JSON object:
-{
-  "scores": [
-    {
-      "prompt": "the prompt text",
-      "score": 0.75,
-      "weakestCriterion": "Output Format"
-    }
-  ],
-  "patterns": [
-    {
-      "id": "missing-output-format",
-      "label": "Missing output format",
-      "frequency": 18,
-      "example": "Explain async/await to me"
-    }
-  ],
-  "suggestions": [
-    {
-      "patternId": "missing-output-format",
-      "text": "Add an expected output format to open-ended requests",
-      "before": "Explain async/await to me",
-      "after": "Explain async/await in 3 bullet points for someone who knows callbacks"
-    }
-  ],
-  "summary": "A prose summary of today's prompting patterns and overall quality."
-}
-
+${rubric.rawText}${historySec}
 Rules:
 - score is a weighted composite 0-1 based on rubric weights
 - Return exactly 3 suggestions (the most impactful ones)
@@ -66,53 +39,58 @@ ${promptList}`;
 }
 
 /**
- * Parses the LLM response as JSON. Retries once with stricter instructions if the first parse fails.
+ * Anthropic tool definition for structured analysis output.
+ * Forces the model to return a validated JSON structure via tool_use.
  */
-async function parseWithRetry(
-  client: Anthropic,
-  systemPrompt: string,
-  userMessage: string,
-): Promise<{
-  scores: PromptScore[];
-  patterns: Pattern[];
-  suggestions: Suggestion[];
-  summary: string;
-}> {
-  const attemptParse = async (strictMode: boolean) => {
-    const retryNote = strictMode
-      ? '\n\nIMPORTANT: Your previous response was not valid JSON. Respond with ONLY the JSON object — no explanation, no markdown code fences, no preamble.'
-      : '';
-
-    const response = await client.messages.create({
-      model: 'claude-opus-4-5',
-      max_tokens: 4096,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userMessage + retryNote }],
-    });
-
-    const text = response.content
-      .filter(b => b.type === 'text')
-      .map(b => (b as { type: 'text'; text: string }).text)
-      .join('');
-
-    // Strip markdown code fences if present
-    const stripped = text.replace(/^```(?:json)?\n?/m, '').replace(/\n?```$/m, '').trim();
-
-    return JSON.parse(stripped);
-  };
-
-  try {
-    return await attemptParse(false);
-  } catch {
-    // Retry once with stricter instructions
-    try {
-      return await attemptParse(true);
-    } catch (err) {
-      const raw = err instanceof Error ? err.message : String(err);
-      throw new Error(`Claude returned non-JSON response after retry. Raw error: ${raw}`);
-    }
-  }
-}
+const REPORT_ANALYSIS_TOOL: Anthropic.Tool = {
+  name: 'report_analysis',
+  description: "Report the structured analysis of today's prompts",
+  input_schema: {
+    type: 'object',
+    properties: {
+      scores: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            prompt: { type: 'string' },
+            score: { type: 'number' },
+            weakestCriterion: { type: 'string' },
+          },
+          required: ['prompt', 'score', 'weakestCriterion'],
+        },
+      },
+      patterns: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            label: { type: 'string' },
+            frequency: { type: 'number' },
+            example: { type: 'string' },
+          },
+          required: ['id', 'label', 'frequency', 'example'],
+        },
+      },
+      suggestions: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            patternId: { type: 'string' },
+            text: { type: 'string' },
+            before: { type: 'string' },
+            after: { type: 'string' },
+          },
+          required: ['patternId', 'text'],
+        },
+      },
+      summary: { type: 'string' },
+    },
+    required: ['scores', 'patterns', 'suggestions', 'summary'],
+  },
+};
 
 /**
  * Computes the weighted average score for the day from per-prompt scores.
@@ -141,10 +119,35 @@ export async function analyzeToday(
   }
 
   const client = new Anthropic({ apiKey });
-  const systemPrompt = buildSystemPrompt(rubric);
+  const historyContext = buildHistoryContext();
+  const systemPrompt = buildSystemPrompt(rubric, historyContext);
   const userMessage = buildUserMessage(entries, date);
 
-  const parsed = await parseWithRetry(client, systemPrompt, userMessage);
+  const response = await client.messages.create({
+    model: 'claude-opus-4-5',
+    max_tokens: 4096,
+    system: systemPrompt,
+    messages: [{ role: 'user', content: userMessage }],
+    tools: [REPORT_ANALYSIS_TOOL],
+    tool_choice: { type: 'tool', name: 'report_analysis' },
+  });
+
+  const toolUse = response.content.find(b => b.type === 'tool_use');
+  if (!toolUse) {
+    throw new Error('Analyzer returned no tool_use block');
+  }
+
+  const parsed = (toolUse as Anthropic.ToolUseBlock).input as {
+    scores: PromptScore[];
+    patterns: Pattern[];
+    suggestions: Suggestion[];
+    summary: string;
+  };
+
+  // Runtime safety check for required fields
+  if (!parsed.scores || !parsed.patterns || !parsed.suggestions || parsed.summary === undefined) {
+    throw new Error('Analyzer tool_use block is missing required fields');
+  }
 
   const scores: PromptScore[] = parsed.scores ?? [];
   const patterns: Pattern[] = parsed.patterns ?? [];
