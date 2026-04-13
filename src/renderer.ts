@@ -60,6 +60,15 @@ export function renderAnalysis(
     console.log('');
   }
 
+  // Main Tip
+  if (analysis.mainTip && analysis.mainTip.text && analysis.mainTip.why) {
+    console.log(chalk.bold.yellow('  ★ Main Tip'));
+    console.log(`  ${analysis.mainTip.text}`);
+    console.log('');
+    console.log(`  ${chalk.dim('Why:')} ${analysis.mainTip.why}`);
+    console.log('');
+  }
+
   // Suggestions
   if (analysis.suggestions.length > 0) {
     console.log(chalk.bold('  Top Suggestions'));

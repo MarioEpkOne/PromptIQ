@@ -76,6 +76,10 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     .detail-pattern-tag { background: #1e2d35; color: #5bc8f5; border-radius: 3px; padding: 2px 8px; font-size: 11px; }
     .detail-section { margin-bottom: 12px; }
     .detail-section-label { color: #666; font-size: 11px; text-transform: uppercase; margin-bottom: 4px; letter-spacing: 0.08em; }
+    .detail-main-tip { background: #1a2a1a; border-left: 3px solid #4caf50; padding: 10px 12px; border-radius: 0 4px 4px 0; }
+    .detail-tip-text { color: #e0e0e0; font-size: 13px; margin-bottom: 6px; }
+    .detail-tip-why { color: #aaa; font-size: 12px; line-height: 1.5; }
+    .detail-tip-why-label { color: #666; text-transform: uppercase; font-size: 10px; letter-spacing: 0.08em; margin-right: 4px; }
   </style>
 </head>
 <body>
@@ -281,6 +285,14 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           html += '<span>' + scoreBadge(data.avgScore || 0) + '</span>';
           html += ' <span style="color:#666;font-size:11px;">' + data.promptCount + ' prompts</span>';
           html += '</div>';
+
+          if (data.mainTip && data.mainTip.text && data.mainTip.why) {
+            html += '<div class="detail-section detail-main-tip">';
+            html += '<div class="detail-section-label">&#9733; Main Tip</div>';
+            html += '<div class="detail-tip-text">' + escHtml(data.mainTip.text) + '</div>';
+            html += '<div class="detail-tip-why"><span class="detail-tip-why-label">Why:</span> ' + escHtml(data.mainTip.why) + '</div>';
+            html += '</div>';
+          }
 
           html += '<div class="detail-section"><div class="detail-section-label">Top Patterns</div>';
           html += renderPatternTags(data.topPatterns);

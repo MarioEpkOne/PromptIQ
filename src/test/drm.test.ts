@@ -37,6 +37,7 @@ describe('drm', () => {
       patterns: [{ id: 'test', label: 'Test', frequency: 5, example: 'x' }],
       suggestions: [],
       summary: 'Test day.',
+      mainTip: { text: 'Test tip.', why: 'Test why.' },
     });
 
     const weeklyPath = path.join(tempDir, '.promptiq', 'weekly', '2026-W15.json');
@@ -208,6 +209,7 @@ describe('drm', () => {
       patterns: [],
       suggestions: [],
       summary: 'Great day.',
+      mainTip: { text: 'Test tip.', why: 'Test why.' },
     });
 
     // Then: attempt to write an error record for the same day
@@ -236,6 +238,7 @@ describe('drm', () => {
         { patternId: 'vague-goal', text: 'Be more specific', before: 'Do something', after: 'Fix the login bug on line 42' },
       ],
       summary: 'Good day with one recurring pattern.',
+      mainTip: { text: 'Test tip.', why: 'Test why.' },
     });
 
     const weeklyPath = path.join(tempDir, '.promptiq', 'weekly', '2026-W15.json');
@@ -261,6 +264,7 @@ describe('drm', () => {
       patterns: [],
       suggestions: [{ patternId: 'p1', text: 'Use context' }],
       summary: 'A day.',
+      mainTip: { text: 'Test tip.', why: 'Test why.' },
     });
 
     const record = getDayDetail('2026-04-10');
@@ -499,6 +503,7 @@ describe('drm', () => {
       patterns: [],
       suggestions: [],
       summary: 'A good Sunday.',
+      mainTip: { text: 'Test tip.', why: 'Test why.' },
     });
 
     // Simulate the W2 fallback logic from cli.ts:

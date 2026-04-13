@@ -1,5 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { LogEntry, Rubric, DayAnalysis, PromptScore, Pattern, Suggestion, WeekDayRecord } from './types.js';
+import type { LogEntry, Rubric, DayAnalysis, PromptScore, Pattern, Suggestion, MainTip, WeekDayRecord } from './types.js';
 import { classifyEntries, loadClassifierConfig } from './classifier.js';
 
 /**
@@ -20,6 +20,7 @@ Rules:
 - Return exactly 3 suggestions (the most impactful ones)
 - patterns must include frequency (count of affected prompts)
 - summary should be 2-4 sentences suitable for archival in long-term memory
+- mainTip must be the single highest-leverage improvement; why must explain the impact on prompt quality
 `;
 }
 
@@ -91,8 +92,16 @@ const REPORT_ANALYSIS_TOOL: Anthropic.Tool = {
         },
       },
       summary: { type: 'string' },
+      mainTip: {
+        type: 'object',
+        properties: {
+          text: { type: 'string', description: 'The single most impactful improvement the user can make (1-2 sentences)' },
+          why:  { type: 'string', description: 'Why this improvement matters for prompt quality (1-2 sentences)' },
+        },
+        required: ['text', 'why'],
+      },
     },
-    required: ['scores', 'patterns', 'suggestions', 'summary'],
+    required: ['scores', 'patterns', 'suggestions', 'summary', 'mainTip'],
   },
 };
 
@@ -149,17 +158,22 @@ export async function analyzeToday(
     patterns: Pattern[];
     suggestions: Suggestion[];
     summary: string;
+    mainTip: { text: string; why: string };
   };
 
   // Runtime safety check for required fields
   if (!parsed.scores || !parsed.patterns || !parsed.suggestions || parsed.summary === undefined) {
     throw new Error('Analyzer tool_use block is missing required fields');
   }
+  if (!parsed.mainTip || !parsed.mainTip.text || !parsed.mainTip.why) {
+    throw new Error('Analyzer tool_use block is missing mainTip or its required sub-fields');
+  }
 
   const scores: PromptScore[] = parsed.scores ?? [];
   const patterns: Pattern[] = parsed.patterns ?? [];
   const suggestions: Suggestion[] = (parsed.suggestions ?? []).slice(0, 3);
   const summary: string = parsed.summary ?? '';
+  const mainTip: MainTip = parsed.mainTip;
 
   return {
     date,
@@ -169,6 +183,7 @@ export async function analyzeToday(
     patterns,
     suggestions,
     summary,
+    mainTip,
   };
 }
 

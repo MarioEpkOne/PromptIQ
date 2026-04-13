@@ -77,6 +77,7 @@ describe('renderer', () => {
       patterns: [{ id: 'vague-goal', label: 'Vague Goal', frequency: 3, example: 'do x' }],
       suggestions: [],
       summary: 'A good day.',
+      mainTip: { text: 'Use concrete goals.', why: 'Concrete goals reduce ambiguity.' },
     };
 
     renderAnalysis(analysis, 0.7, null, []);
@@ -85,6 +86,45 @@ describe('renderer', () => {
     expect(output).not.toContain('trend');
     expect(output).toContain('Vague Goal');
     expect(output).toContain('3 of 5 prompts');
+  });
+
+  it('renderAnalysis shows Main Tip section with text and why when mainTip is present', () => {
+    const analysis: DayAnalysis = {
+      date: '2026-04-11',
+      promptCount: 3,
+      avgScore: 0.7,
+      scores: [],
+      patterns: [],
+      suggestions: [],
+      summary: 'Summary.',
+      mainTip: {
+        text: 'Always specify expected output format.',
+        why: 'Clear output format reduces ambiguity.',
+      },
+    };
+
+    renderAnalysis(analysis, null, null, []);
+
+    const output = consoleOutput.join('\n');
+    expect(output).toContain('Main Tip');
+    expect(output).toContain('Always specify expected output format.');
+    expect(output).toContain('Clear output format reduces ambiguity.');
+  });
+
+  it('renderAnalysis does not crash when mainTip is absent', () => {
+    const analysis = {
+      date: '2026-04-11',
+      promptCount: 3,
+      avgScore: 0.7,
+      scores: [],
+      patterns: [],
+      suggestions: [],
+      summary: 'Summary.',
+    } as unknown as DayAnalysis; // simulate old record without mainTip
+
+    expect(() => renderAnalysis(analysis, null, null, [])).not.toThrow();
+    const output = consoleOutput.join('\n');
+    expect(output).not.toContain('Main Tip');
   });
 
   it('renderStatus does not show warning when no error days', () => {
