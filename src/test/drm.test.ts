@@ -280,6 +280,265 @@ describe('drm', () => {
     expect(record).toBeNull();
   });
 
+  it('runRollup compression excludes error days from avgScore', async () => {
+    const { ensureDirectories } = await import('../logger.js');
+    const { runRollup } = await import('../drm.js');
+    ensureDirectories();
+
+    // Write a weekly file from 2 weeks ago (detail: daily) with one good day and one error day
+    const twoWeeksAgo = new Date();
+    twoWeeksAgo.setUTCDate(twoWeeksAgo.getUTCDate() - 14);
+    const twoWeeksAgoStr = twoWeeksAgo.toISOString().split('T')[0];
+    const dayBefore = new Date(twoWeeksAgo);
+    dayBefore.setUTCDate(twoWeeksAgo.getUTCDate() - 1);
+    const dayBeforeStr = dayBefore.toISOString().split('T')[0];
+
+    const { isoWeekLabel } = await import('../drm.js');
+    const weekLabel = isoWeekLabel(twoWeeksAgoStr);
+
+    const weeklyDir = path.join(tempDir, '.promptiq', 'weekly');
+    fs.mkdirSync(weeklyDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(weeklyDir, `${weekLabel}.json`),
+      JSON.stringify({
+        week: weekLabel,
+        startDate: dayBeforeStr,
+        endDate: twoWeeksAgoStr,
+        detail: 'daily',
+        days: {
+          [dayBeforeStr]: {
+            promptCount: 10,
+            avgScore: 0.8,
+            topPatterns: [],
+            summary: 'Good day.',
+          },
+          [twoWeeksAgoStr]: {
+            promptCount: 5,
+            avgScore: 0,
+            topPatterns: [],
+            summary: '',
+            error: true,
+            errorType: 'Error',
+            errorMessage: 'API failed',
+          },
+        },
+      }),
+    );
+
+    await runRollup();
+
+    const content = JSON.parse(fs.readFileSync(path.join(weeklyDir, `${weekLabel}.json`), 'utf-8'));
+    expect(content.detail).toBe('compressed');
+    // Only the good day (10 prompts at 0.8) should count — error day excluded
+    expect(content.promptCount).toBe(10);
+    expect(content.avgScore).toBeCloseTo(0.8, 5);
+  });
+
+  it('findLastAnalysisDate skips error days and returns last successful date', async () => {
+    const { findLastAnalysisDate } = await import('../drm.js');
+    const weeklyFiles = [
+      {
+        week: '2026-W15',
+        startDate: '2026-04-07',
+        endDate: '2026-04-13',
+        detail: 'daily' as const,
+        days: {
+          '2026-04-10': { promptCount: 5, avgScore: 0, topPatterns: [], summary: '', error: true },
+          '2026-04-11': { promptCount: 8, avgScore: 0.75, topPatterns: [], summary: 'Good.' },
+        },
+      },
+    ];
+    expect(findLastAnalysisDate(weeklyFiles)).toBe('2026-04-11');
+  });
+
+  it('findLastAnalysisDate falls back to compressed week endDate when no daily detail', async () => {
+    const { findLastAnalysisDate } = await import('../drm.js');
+    const weeklyFiles = [
+      {
+        week: '2026-W14',
+        startDate: '2026-03-30',
+        endDate: '2026-04-05',
+        detail: 'compressed' as const,
+        promptCount: 42,
+        avgScore: 0.71,
+        topPatterns: [],
+        summary: 'A week.',
+      },
+    ];
+    expect(findLastAnalysisDate(weeklyFiles)).toBe('2026-04-05');
+  });
+
+  it('findLastAnalysisDate returns null when no weekly files', async () => {
+    const { findLastAnalysisDate } = await import('../drm.js');
+    expect(findLastAnalysisDate([])).toBeNull();
+  });
+
+  it('W5: pattern seen in only 1 week does not appear in persistentPatterns after monthly merge', async () => {
+    const { ensureDirectories } = await import('../logger.js');
+    const { runRollup } = await import('../drm.js');
+    ensureDirectories();
+
+    // Write a weekly file 5 weeks old (older than 28 days) with one pattern
+    const fiveWeeksAgo = new Date();
+    fiveWeeksAgo.setUTCDate(fiveWeeksAgo.getUTCDate() - 35);
+    const fiveWeeksAgoStr = fiveWeeksAgo.toISOString().split('T')[0];
+
+    const { isoWeekLabel } = await import('../drm.js');
+    const weekLabel = isoWeekLabel(fiveWeeksAgoStr);
+
+    const weeklyDir = path.join(tempDir, '.promptiq', 'weekly');
+    fs.mkdirSync(weeklyDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(weeklyDir, `${weekLabel}.json`),
+      JSON.stringify({
+        week: weekLabel,
+        startDate: fiveWeeksAgoStr,
+        endDate: fiveWeeksAgoStr,
+        detail: 'compressed',
+        promptCount: 10,
+        avgScore: 0.7,
+        topPatterns: ['vague-goal'],
+        summary: 'Old week.',
+      }),
+    );
+
+    await runRollup();
+
+    // Check monthly file was created
+    const monthlyDir = path.join(tempDir, '.promptiq', 'monthly');
+    const monthlyFiles = fs.existsSync(monthlyDir)
+      ? fs.readdirSync(monthlyDir).filter(f => f.endsWith('.json'))
+      : [];
+    expect(monthlyFiles.length).toBeGreaterThan(0);
+
+    const monthly = JSON.parse(fs.readFileSync(path.join(monthlyDir, monthlyFiles[0]), 'utf-8'));
+    // Pattern seen only once — must NOT be in persistentPatterns
+    expect(monthly.persistentPatterns).not.toContain('vague-goal');
+    // But patternFrequency should track it
+    expect(monthly.patternFrequency['vague-goal']).toBe(1);
+  });
+
+  it('W5: pattern seen in 2 weeks appears in persistentPatterns after two monthly merges', async () => {
+    const { ensureDirectories } = await import('../logger.js');
+    const { runRollup } = await import('../drm.js');
+    ensureDirectories();
+
+    // Write two weekly records from the same month, both 5+ weeks old
+    const baseDate = new Date();
+    baseDate.setUTCDate(baseDate.getUTCDate() - 35);
+    const week1Str = baseDate.toISOString().split('T')[0];
+    const week2Date = new Date(baseDate);
+    week2Date.setUTCDate(baseDate.getUTCDate() - 7);
+    const week2Str = week2Date.toISOString().split('T')[0];
+
+    const { isoWeekLabel } = await import('../drm.js');
+    const weekLabel1 = isoWeekLabel(week1Str);
+    const weekLabel2 = isoWeekLabel(week2Str);
+
+    const weeklyDir = path.join(tempDir, '.promptiq', 'weekly');
+    fs.mkdirSync(weeklyDir, { recursive: true });
+
+    for (const [label, dateStr] of [[weekLabel1, week1Str], [weekLabel2, week2Str]] as [string, string][]) {
+      fs.writeFileSync(
+        path.join(weeklyDir, `${label}.json`),
+        JSON.stringify({
+          week: label,
+          startDate: dateStr,
+          endDate: dateStr,
+          detail: 'compressed',
+          promptCount: 10,
+          avgScore: 0.7,
+          topPatterns: ['vague-goal'],
+          summary: 'Old week.',
+        }),
+      );
+    }
+
+    await runRollup();
+
+    const monthlyDir = path.join(tempDir, '.promptiq', 'monthly');
+    const monthlyFiles = fs.existsSync(monthlyDir)
+      ? fs.readdirSync(monthlyDir).filter(f => f.endsWith('.json'))
+      : [];
+    expect(monthlyFiles.length).toBeGreaterThan(0);
+
+    // Find the relevant monthly file (use the one with highest count or just take first)
+    let monthly: { persistentPatterns: string[]; patternFrequency: Record<string, number> } | null = null;
+    for (const f of monthlyFiles) {
+      const m = JSON.parse(fs.readFileSync(path.join(monthlyDir, f), 'utf-8'));
+      if (m.patternFrequency?.['vague-goal'] >= 2) {
+        monthly = m;
+        break;
+      }
+    }
+
+    expect(monthly).not.toBeNull();
+    expect(monthly!.persistentPatterns).toContain('vague-goal');
+    expect(monthly!.patternFrequency['vague-goal']).toBeGreaterThanOrEqual(2);
+  });
+
+  it('W2: Monday correctly finds Sunday\'s score from previous ISO week', async () => {
+    const { ensureDirectories } = await import('../logger.js');
+    const { isoWeekLabel, upsertDayInWeekly, getDrmSummary } = await import('../drm.js');
+    ensureDirectories();
+
+    // Sunday 2026-04-12 is in ISO W15; Monday 2026-04-13 is in ISO W16
+    const sunday = '2026-04-12';
+    const monday = '2026-04-13';
+
+    // Confirm they are in different ISO weeks (the core W2 invariant)
+    expect(isoWeekLabel(sunday)).toBe('2026-W15');
+    expect(isoWeekLabel(monday)).toBe('2026-W16');
+
+    // Write Sunday's successful analysis into its weekly file (W15)
+    await upsertDayInWeekly({
+      date: sunday,
+      promptCount: 7,
+      avgScore: 0.82,
+      scores: [],
+      patterns: [],
+      suggestions: [],
+      summary: 'A good Sunday.',
+    });
+
+    // Simulate the W2 fallback logic from cli.ts:
+    // today = monday, yesterday = sunday
+    // currentWeekLabel = isoWeekLabel(monday) = W16 (no entry for sunday here)
+    // fallback: lastWeekLabel = isoWeekLabel(sunday) = W15 → should find 0.82
+    const yesterday = sunday;
+    const todayWeekLabel = isoWeekLabel(monday);
+    const lastWeekLabel = isoWeekLabel(yesterday);
+
+    const { weeklyFiles } = getDrmSummary();
+
+    // Primary lookup (current week W16) — should not find sunday
+    const currentWeekly = weeklyFiles.find(w => w.week === todayWeekLabel) ?? null;
+    let previousDayScore: number | null = null;
+    if (currentWeekly && currentWeekly.detail === 'daily') {
+      const days = (currentWeekly as import('../types.js').WeeklyRecordDaily).days;
+      if (yesterday in days && !days[yesterday].error) {
+        previousDayScore = days[yesterday].avgScore;
+      }
+    }
+
+    // Primary lookup must find nothing (sunday is not in W16)
+    expect(previousDayScore).toBeNull();
+
+    // Fallback lookup (last week W15) — should find sunday's score
+    if (previousDayScore === null) {
+      const lastWeekly = weeklyFiles.find(w => w.week === lastWeekLabel) ?? null;
+      if (lastWeekly && lastWeekly.detail === 'daily') {
+        const lastDays = (lastWeekly as import('../types.js').WeeklyRecordDaily).days;
+        if (yesterday in lastDays && !lastDays[yesterday].error) {
+          previousDayScore = lastDays[yesterday].avgScore;
+        }
+      }
+    }
+
+    // Fallback must have found Sunday's score from W15
+    expect(previousDayScore).toBeCloseTo(0.82, 5);
+  });
+
   it('getDayDetail returns null for a compressed week', async () => {
     const { ensureDirectories } = await import('../logger.js');
     const { getDayDetail } = await import('../drm.js');
