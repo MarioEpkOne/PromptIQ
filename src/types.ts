@@ -94,5 +94,6 @@ export interface MonthlyRecord {
   promptCount: number;
   avgScore: number;
   persistentPatterns: string[];
+  patternFrequency: Record<string, number>;  // tracks cross-week occurrence counts
   summary: string;
 }

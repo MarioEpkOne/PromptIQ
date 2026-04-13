@@ -14,8 +14,8 @@ jest.mock('chalk', () => {
   return { __esModule: true, default: tagged };
 });
 
-import { renderStatus } from '../renderer.js';
-import type { WeeklyRecord, WeeklyRecordDaily } from '../types.js';
+import { renderStatus, renderAnalysis } from '../renderer.js';
+import type { WeeklyRecord, WeeklyRecordDaily, DayAnalysis } from '../types.js';
 
 describe('renderer', () => {
   let consoleOutput: string[];
@@ -66,6 +66,25 @@ describe('renderer', () => {
     expect(output).toContain('1 day');
     expect(output).toContain('failed to analyze');
     expect(output).toContain('2026-04-10');
+  });
+
+  it('renderAnalysis does not include trend label text in pattern output', () => {
+    const analysis: DayAnalysis = {
+      date: '2026-04-11',
+      promptCount: 5,
+      avgScore: 0.8,
+      scores: [],
+      patterns: [{ id: 'vague-goal', label: 'Vague Goal', frequency: 3, example: 'do x' }],
+      suggestions: [],
+      summary: 'A good day.',
+    };
+
+    renderAnalysis(analysis, 0.7, null, []);
+
+    const output = consoleOutput.join('\n');
+    expect(output).not.toContain('trend');
+    expect(output).toContain('Vague Goal');
+    expect(output).toContain('3 of 5 prompts');
   });
 
   it('renderStatus does not show warning when no error days', () => {

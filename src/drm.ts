@@ -89,10 +89,15 @@ function readMonthly(month: string): MonthlyRecord | null {
   const filePath = monthlyPath(month);
   if (!fs.existsSync(filePath)) return null;
   try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf-8')) as MonthlyRecord;
+    const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as MonthlyRecord;
+    return normalizeMonthly(raw);
   } catch {
     return null;
   }
+}
+
+function normalizeMonthly(record: MonthlyRecord): MonthlyRecord {
+  return { ...record, patternFrequency: record.patternFrequency ?? {} };
 }
 
 function writeMonthly(record: MonthlyRecord): void {
@@ -305,10 +310,11 @@ export async function runRollup(): Promise<void> {
     // Compress from daily to aggregate
     const dailyRecord = record as WeeklyRecordDaily;
     const days = Object.values(dailyRecord.days);
-    const totalPrompts = days.reduce((s, d) => s + d.promptCount, 0);
+    const validDays = days.filter(d => !d.error);
+    const totalPrompts = validDays.reduce((s, d) => s + d.promptCount, 0);
     const avgScore =
-      days.length > 0
-        ? days.reduce((s, d) => s + d.avgScore * d.promptCount, 0) / Math.max(totalPrompts, 1)
+      validDays.length > 0
+        ? validDays.reduce((s, d) => s + d.avgScore * d.promptCount, 0) / Math.max(totalPrompts, 1)
         : 0;
     const patternCounts: Record<string, number> = {};
     for (const d of days) {
@@ -410,6 +416,7 @@ export async function runRollup(): Promise<void> {
         promptCount: 0,
         avgScore: 0,
         persistentPatterns: [],
+        patternFrequency: {},
         summary: '',
       };
     }
@@ -422,15 +429,25 @@ export async function runRollup(): Promise<void> {
         ? (monthly.avgScore * oldTotal + weekAvgScore * weekPromptCount) / newTotal
         : 0;
 
-    // Merge patterns — keep ones seen in both old and new (persistent)
-    const allPatterns = new Set([...monthly.persistentPatterns, ...weekPatterns]);
-    const persistent = [...allPatterns].slice(0, 5);
+    // Increment frequency for each pattern seen this week
+    const freq = { ...monthly.patternFrequency };
+    for (const p of weekPatterns) {
+      freq[p] = (freq[p] ?? 0) + 1;
+    }
+
+    // Persistent = patterns seen in >= 2 separate weekly merges, top 5 by frequency
+    const persistent = Object.entries(freq)
+      .filter(([, count]) => count >= 2)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([id]) => id);
 
     monthly = {
       month,
       weekCount: monthly.weekCount + 1,
       promptCount: newTotal,
       avgScore: Math.min(1, newAvg),
+      patternFrequency: freq,
       persistentPatterns: persistent,
       summary: [monthly.summary, weekSummary].filter(Boolean).join(' '),
     };
@@ -512,6 +529,37 @@ export function getDayDetail(date: string): WeekDayRecord | null {
   const record = readWeekly(week);
   if (!record || record.detail !== 'daily') return null;
   return (record as WeeklyRecordDaily).days[date] ?? null;
+}
+
+/**
+ * Returns the most recent successfully-analyzed date across all weekly files.
+ * Skips error days. Falls back to compressed week endDate if no daily detail found.
+ */
+export function findLastAnalysisDate(weeklyFiles: WeeklyRecord[]): string | null {
+  let lastDate: string | null = null;
+
+  for (const w of weeklyFiles) {
+    if (w.detail === 'daily') {
+      for (const [date, d] of Object.entries((w as WeeklyRecordDaily).days)) {
+        if (!d.error && (!lastDate || date > lastDate)) {
+          lastDate = date;
+        }
+      }
+    }
+  }
+
+  // Compressed week fallback: if no daily detail found, use endDate of compressed weeks
+  if (!lastDate) {
+    for (const w of weeklyFiles) {
+      if (w.detail === 'compressed') {
+        if (!lastDate || w.endDate > lastDate) {
+          lastDate = w.endDate;
+        }
+      }
+    }
+  }
+
+  return lastDate;
 }
 
 export function getDrmSummary(): {

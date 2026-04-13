@@ -5,7 +5,7 @@ import * as path from 'path';
 import { runLog, readTodayEntries, readEntriesForDate, listDailyDates, ensureDirectories } from './logger.js';
 import { loadRubric, copyDefaultRubric, rubricPath } from './rubric.js';
 import { analyzeToday } from './analyzer.js';
-import { runRollup, upsertDayInWeekly, upsertErrorInWeekly, getDrmSummary, isoWeekLabel } from './drm.js';
+import { runRollup, upsertDayInWeekly, upsertErrorInWeekly, getDrmSummary, isoWeekLabel, findLastAnalysisDate } from './drm.js';
 import {
   renderAnalysis,
   renderStatus,
@@ -110,8 +110,19 @@ program
     // Check current weekly file for yesterday
     if (currentWeekly && currentWeekly.detail === 'daily') {
       const days = (currentWeekly as WeeklyRecordDaily).days;
-      if (yesterday in days) {
+      if (yesterday in days && !days[yesterday].error) {
         previousDayScore = days[yesterday].avgScore;
+      }
+    }
+    // Fallback: yesterday may be in last week's file (e.g. Monday → Sunday)
+    if (previousDayScore === null) {
+      const lastWeekLabel = isoWeekLabel(yesterday);
+      const lastWeekly = weeklyFiles.find(w => w.week === lastWeekLabel) ?? null;
+      if (lastWeekly && lastWeekly.detail === 'daily') {
+        const lastDays = (lastWeekly as WeeklyRecordDaily).days;
+        if (yesterday in lastDays && !lastDays[yesterday].error) {
+          previousDayScore = lastDays[yesterday].avgScore;
+        }
       }
     }
 
@@ -133,16 +144,7 @@ program
 
     // Find last analysis date from weekly files
     const { weeklyFiles, monthlyFiles } = getDrmSummary();
-    let lastAnalysisDate: string | null = null;
-    for (const w of weeklyFiles.slice().reverse()) {
-      if (w.detail === 'daily') {
-        const days = Object.keys((w as WeeklyRecordDaily).days).sort().reverse();
-        if (days.length > 0) {
-          lastAnalysisDate = days[0];
-          break;
-        }
-      }
-    }
+    const lastAnalysisDate = findLastAnalysisDate(weeklyFiles);
 
     renderStatus(todayCount, lastAnalysisDate, weeklyFiles, monthlyFiles);
   });

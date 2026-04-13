@@ -1,6 +1,6 @@
 import * as http from 'http';
 import { readTodayEntries, ensureDirectories } from './logger.js';
-import { getDrmSummary, getWeeklyDetail, getMonthlyDetail, getDayDetail } from './drm.js';
+import { getDrmSummary, getWeeklyDetail, getMonthlyDetail, getDayDetail, findLastAnalysisDate } from './drm.js';
 import type { WeeklyRecord, WeeklyRecordDaily, WeeklyRecordCompressed, MonthlyRecord } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -364,26 +364,13 @@ function buildStatusResponse(): object {
   const entries = readTodayEntries();
   const { weeklyFiles, monthlyFiles } = getDrmSummary();
 
-  let lastAnalysisDate: string | null = null;
+  const lastAnalysisDate = findLastAnalysisDate(weeklyFiles);
   const failedDates: string[] = [];
 
   for (const w of weeklyFiles) {
     if (w.detail === 'daily') {
       for (const [date, d] of Object.entries((w as WeeklyRecordDaily).days)) {
         if (d.error) failedDates.push(date);
-        else if (!lastAnalysisDate || date > lastAnalysisDate) {
-          lastAnalysisDate = date;
-        }
-      }
-    }
-  }
-  // Fallback: if no daily records found, use endDate from compressed weekly records
-  if (!lastAnalysisDate) {
-    for (const w of weeklyFiles) {
-      if (w.detail === 'compressed') {
-        if (!lastAnalysisDate || w.endDate > lastAnalysisDate) {
-          lastAnalysisDate = w.endDate;
-        }
       }
     }
   }

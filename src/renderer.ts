@@ -53,10 +53,8 @@ export function renderAnalysis(
   if (analysis.patterns.length > 0) {
     console.log(chalk.bold('  Patterns Detected'));
     for (const p of analysis.patterns) {
-      const upDown =
-        diff !== null && diff < 0 ? chalk.red('↑ worsening trend') : chalk.green('↓ resolved trend');
       console.log(
-        `  ${chalk.yellow('●')} ${p.label.padEnd(28)} ${String(p.frequency).padStart(2)} of ${analysis.promptCount} prompts  (${upDown})`,
+        `  ${chalk.yellow('●')} ${p.label.padEnd(28)} ${String(p.frequency).padStart(2)} of ${analysis.promptCount} prompts`,
       );
     }
     console.log('');
