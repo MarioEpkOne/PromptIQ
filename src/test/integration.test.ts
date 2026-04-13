@@ -56,13 +56,15 @@ describe('integration: analyze flow', () => {
 
     ensureDirectories();
 
-    // Seed daily file with 3+ entries
+    // Seed daily file with 3 task prompts + 2 control prompts
     const today = new Date().toISOString().split('T')[0];
     const filePath = todayLogPath();
     const entries = [
-      { timestamp: '2026-04-10T10:00:00Z', prompt: 'Prompt A' },
-      { timestamp: '2026-04-10T10:01:00Z', prompt: 'Prompt B' },
-      { timestamp: '2026-04-10T10:02:00Z', prompt: 'Prompt C' },
+      { timestamp: '2026-04-10T10:00:00Z', prompt: 'Prompt A — implement retry mechanism for the HTTP client' },
+      { timestamp: '2026-04-10T10:01:00Z', prompt: 'yes' },
+      { timestamp: '2026-04-10T10:02:00Z', prompt: 'Prompt B — refactor the database layer to use repositories' },
+      { timestamp: '2026-04-10T10:03:00Z', prompt: 'ok' },
+      { timestamp: '2026-04-10T10:04:00Z', prompt: 'Prompt C — add unit tests for the auth module edge cases' },
     ];
     fs.writeFileSync(filePath, entries.map(e => JSON.stringify(e)).join('\n') + '\n');
 
@@ -79,7 +81,10 @@ describe('integration: analyze flow', () => {
     const weeklyContent = JSON.parse(fs.readFileSync(weeklyPath, 'utf-8'));
     expect(weeklyContent.detail).toBe('daily');
     expect(weeklyContent.days[today]).toBeDefined();
+    // promptCount must be task-only (3 task, 2 control excluded)
     expect(weeklyContent.days[today].promptCount).toBe(3);
+    // Total entries passed in were 5, so if promptCount is 3, controls were excluded
+    expect(entries.length).toBe(5);
   });
 
   it('8-day simulation: day-8 file rolls into weekly on rollup', async () => {

@@ -1,5 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { LogEntry, Rubric, DayAnalysis, PromptScore, Pattern, Suggestion, WeekDayRecord } from './types.js';
+import { classifyEntries, loadClassifierConfig } from './classifier.js';
 
 /**
  * Builds the system prompt for the Anthropic API call.
@@ -121,9 +122,13 @@ export async function analyzeToday(
     throw new Error('ANTHROPIC_API_KEY is not set. Export it in your shell profile.');
   }
 
+  // Classify and filter: exclude control prompts (short approvals, confirmations)
+  const classifierConfig = loadClassifierConfig();
+  const { taskEntries } = classifyEntries(entries, classifierConfig);
+
   const client = new Anthropic({ apiKey });
   const systemPrompt = buildSystemPrompt(rubric);
-  const userMessage = buildUserMessage(entries, date);
+  const userMessage = buildUserMessage(taskEntries, date);
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
@@ -158,7 +163,7 @@ export async function analyzeToday(
 
   return {
     date,
-    promptCount: entries.length,
+    promptCount: taskEntries.length,
     avgScore: computeAvgScore(scores),
     scores,
     patterns,

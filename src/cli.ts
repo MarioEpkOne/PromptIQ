@@ -5,6 +5,7 @@ import * as path from 'path';
 import { runLog, readTodayEntries, readEntriesForDate, listDailyDates, ensureDirectories } from './logger.js';
 import { loadRubric, copyDefaultRubric, rubricPath } from './rubric.js';
 import { analyzeToday } from './analyzer.js';
+import { classifyEntries, loadClassifierConfig } from './classifier.js';
 import { runRollup, upsertDayInWeekly, upsertErrorInWeekly, getDrmSummary, isoWeekLabel, findLastAnalysisDate } from './drm.js';
 import {
   renderAnalysis,
@@ -63,9 +64,16 @@ program
     const today = new Date().toISOString().split('T')[0];
     const entries = readTodayEntries();
 
-    if (entries.length < 3) {
+    const classifierConfig = loadClassifierConfig();
+    const { taskEntries } = classifyEntries(entries, classifierConfig);
+
+    if (taskEntries.length < 3) {
+      const excluded = entries.length - taskEntries.length;
+      const suffix = excluded > 0
+        ? ` (${excluded} control prompt(s) excluded)`
+        : '';
       console.log(
-        `Not enough prompts today (need at least 3). Keep using Claude Code and try again.`,
+        `Not enough task prompts today (need at least 3)${suffix}. Keep using Claude Code and try again.`,
       );
       process.exit(0);
     }
@@ -199,7 +207,7 @@ program
 // ---------------------------------------------------------------------------
 program
   .command('serve')
-  .description('Start local web dashboard at http://localhost:4242')
+  .description('Start local web dashboard at http://promptiq:4242')
   .option('-p, --port <number>', 'Port to listen on', '4242')
   .option('--no-open', 'Do not open the browser automatically (useful for background/startup use)')
   .action((options: { port: string; open: boolean }) => {
@@ -217,7 +225,7 @@ program
     });
 
     server.on('listening', () => {
-      const url = `http://localhost:${port}`;
+      const url = `http://promptiq:${port}`;
       console.log(`PromptIQ UI running at ${url}`);
       console.log('Press Ctrl+C to stop.');
       if (options.open !== false) {
@@ -281,14 +289,16 @@ program
     console.log('');
 
     const rubric = loadRubric();
+    const classifierConfig = loadClassifierConfig();
     let analyzed = 0;
     let skipped = 0;
     let failed = 0;
 
     for (const date of missedDates) {
       const entries = readEntriesForDate(date);
-      if (entries.length < 3) {
-        console.log(`  Skipping ${date} — only ${entries.length} prompt(s) logged (need at least 3)`);
+      const { taskEntries: taskEntriesForDate } = classifyEntries(entries, classifierConfig);
+      if (taskEntriesForDate.length < 3) {
+        console.log(`  Skipping ${date} — only ${taskEntriesForDate.length} task prompt(s) logged (need at least 3)`);
         skipped++;
         continue;
       }
