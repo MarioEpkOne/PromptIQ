@@ -220,4 +220,89 @@ describe('drm', () => {
     expect(content.days['2026-04-10'].avgScore).toBeCloseTo(0.8, 5);
     expect(content.days['2026-04-10'].summary).toBe('Great day.');
   });
+
+  it('upsertDayInWeekly stores suggestions in WeekDayRecord', async () => {
+    const { ensureDirectories } = await import('../logger.js');
+    const { upsertDayInWeekly } = await import('../drm.js');
+    ensureDirectories();
+
+    await upsertDayInWeekly({
+      date: '2026-04-10',
+      promptCount: 8,
+      avgScore: 0.75,
+      scores: [],
+      patterns: [{ id: 'vague-goal', label: 'Vague Goal', frequency: 3, example: 'do something' }],
+      suggestions: [
+        { patternId: 'vague-goal', text: 'Be more specific', before: 'Do something', after: 'Fix the login bug on line 42' },
+      ],
+      summary: 'Good day with one recurring pattern.',
+    });
+
+    const weeklyPath = path.join(tempDir, '.promptiq', 'weekly', '2026-W15.json');
+    const content = JSON.parse(fs.readFileSync(weeklyPath, 'utf-8'));
+    const dayRecord = content.days['2026-04-10'];
+    expect(dayRecord.suggestions).toBeDefined();
+    expect(dayRecord.suggestions).toHaveLength(1);
+    expect(dayRecord.suggestions[0].patternId).toBe('vague-goal');
+    expect(dayRecord.suggestions[0].before).toBe('Do something');
+    expect(dayRecord.suggestions[0].after).toBe('Fix the login bug on line 42');
+  });
+
+  it('getDayDetail returns WeekDayRecord for known date', async () => {
+    const { ensureDirectories } = await import('../logger.js');
+    const { upsertDayInWeekly, getDayDetail } = await import('../drm.js');
+    ensureDirectories();
+
+    await upsertDayInWeekly({
+      date: '2026-04-10',
+      promptCount: 5,
+      avgScore: 0.6,
+      scores: [],
+      patterns: [],
+      suggestions: [{ patternId: 'p1', text: 'Use context' }],
+      summary: 'A day.',
+    });
+
+    const record = getDayDetail('2026-04-10');
+    expect(record).not.toBeNull();
+    expect(record!.promptCount).toBe(5);
+    expect(record!.avgScore).toBeCloseTo(0.6, 5);
+    expect(record!.suggestions).toHaveLength(1);
+    expect(record!.suggestions![0].patternId).toBe('p1');
+  });
+
+  it('getDayDetail returns null for unknown date', async () => {
+    const { ensureDirectories } = await import('../logger.js');
+    const { getDayDetail } = await import('../drm.js');
+    ensureDirectories();
+
+    const record = getDayDetail('2026-01-01');
+    expect(record).toBeNull();
+  });
+
+  it('getDayDetail returns null for a compressed week', async () => {
+    const { ensureDirectories } = await import('../logger.js');
+    const { getDayDetail } = await import('../drm.js');
+    ensureDirectories();
+
+    // Write a compressed weekly file for the week containing 2026-04-10
+    const weeklyDir = path.join(tempDir, '.promptiq', 'weekly');
+    fs.mkdirSync(weeklyDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(weeklyDir, '2026-W15.json'),
+      JSON.stringify({
+        week: '2026-W15',
+        startDate: '2026-04-06',
+        endDate: '2026-04-12',
+        detail: 'compressed',
+        promptCount: 20,
+        avgScore: 0.7,
+        topPatterns: ['vague-goal'],
+        summary: 'Compressed week.',
+      }),
+    );
+
+    const record = getDayDetail('2026-04-10');
+    expect(record).toBeNull();
+  });
 });

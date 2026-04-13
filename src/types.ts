@@ -57,6 +57,7 @@ export interface WeekDayRecord {
   avgScore: number;
   topPatterns: string[];
   summary: string;
+  suggestions?: Suggestion[];   // from DayAnalysis.suggestions
   // Error fields (only present when analysis failed)
   error?: boolean;
   errorType?: string;

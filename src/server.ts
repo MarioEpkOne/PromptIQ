@@ -1,7 +1,7 @@
 import * as http from 'http';
 import { readTodayEntries, ensureDirectories } from './logger.js';
-import { getDrmSummary, getWeeklyDetail, getMonthlyDetail } from './drm.js';
-import type { WeeklyRecord, WeeklyRecordDaily, MonthlyRecord } from './types.js';
+import { getDrmSummary, getWeeklyDetail, getMonthlyDetail, getDayDetail } from './drm.js';
+import type { WeeklyRecord, WeeklyRecordDaily, WeeklyRecordCompressed, MonthlyRecord } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Inline HTML dashboard (D2, D7: embedded template literal, no file I/O)
@@ -136,21 +136,50 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       try {
         const data = await fetch('/api/patterns').then(r => r.json());
         let html = '';
-        if ((!data.weekly || data.weekly.length === 0) && (!data.monthly || data.monthly.length === 0)) {
+        const hasDays = data.days && data.days.length > 0;
+        const hasWeekly = data.weekly && data.weekly.length > 0;
+        const hasMonthly = data.monthly && data.monthly.length > 0;
+
+        if (!hasDays && !hasWeekly && !hasMonthly) {
           html = '<p class="empty">No historical data yet. Run <code>promptiq analyze</code> to start building memory.</p>';
         } else {
-          if (data.weekly && data.weekly.length > 0) {
-            html += '<h3 style="color:#888;font-size:12px;margin-bottom:8px;">WEEKLY</h3><table><tr><th>Week</th><th>Score</th><th>Prompts</th><th>Detail</th><th style="color:#5bc8f5;font-size:11px;">&#9654; view</th></tr>';
+          // DAYS section
+          html += '<h3 style="color:#888;font-size:12px;margin-bottom:8px;">DAYS</h3>';
+          if (!hasDays) {
+            html += '<p class="empty" style="margin-bottom:16px;">No analyzed days yet. Run <code>promptiq analyze</code> to get started.</p>';
+          } else {
+            html += '<table><tr><th>Date</th><th>Score</th><th>Prompts</th><th style="color:#5bc8f5;font-size:11px;">&#9654; view</th></tr>';
+            for (const d of data.days) {
+              if (d.error) {
+                html += '<tr class="clickable" data-type="day" data-id="' + d.date + '">'
+                  + '<td>' + d.date + '</td>'
+                  + '<td><span style="color:#f44336;font-size:12px;">failed</span></td>'
+                  + '<td>' + (d.promptCount || '\u2014') + '</td>'
+                  + '<td style="color:#5bc8f5;font-size:12px;">&#9654;</td></tr>';
+              } else {
+                html += '<tr class="clickable" data-type="day" data-id="' + d.date + '">'
+                  + '<td>' + d.date + '</td>'
+                  + '<td>' + scoreBadge(d.avgScore || 0) + '</td>'
+                  + '<td>' + (d.promptCount || '\u2014') + '</td>'
+                  + '<td style="color:#5bc8f5;font-size:12px;">&#9654;</td></tr>';
+              }
+            }
+            html += '</table><br/>';
+          }
+
+          // WEEKLY section (compressed records only)
+          if (hasWeekly) {
+            html += '<h3 style="color:#888;font-size:12px;margin-bottom:8px;">WEEKLY</h3><table><tr><th>Week</th><th>Score</th><th>Prompts</th><th style="color:#5bc8f5;font-size:11px;">&#9654; view</th></tr>';
             for (const w of data.weekly.slice().reverse()) {
-              const detail = w.detail === 'compressed' ? 'compressed' : 'daily';
               html += '<tr class="clickable" data-type="week" data-id="' + w.week + '">'
                 + '<td>' + w.week + '</td><td>' + scoreBadge(w.avgScore || 0) + '</td><td>' + (w.promptCount || '\u2014') + '</td>'
-                + '<td style="color:#666;font-size:12px;">' + detail + '</td>'
                 + '<td style="color:#5bc8f5;font-size:12px;">&#9654;</td></tr>';
             }
             html += '</table><br/>';
           }
-          if (data.monthly && data.monthly.length > 0) {
+
+          // MONTHLY section
+          if (hasMonthly) {
             html += '<h3 style="color:#888;font-size:12px;margin-bottom:8px;">MONTHLY</h3><table><tr><th>Month</th><th>Score</th><th>Prompts</th><th>Weeks</th><th style="color:#5bc8f5;font-size:11px;">&#9654; view</th></tr>';
             for (const m of data.monthly.slice().reverse()) {
               html += '<tr class="clickable" data-type="month" data-id="' + m.month + '">'
@@ -237,6 +266,38 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
               if (day.summary) html += '<div class="detail-summary">' + escHtml(day.summary) + '</div>';
               html += '</div>';
             }
+          }
+        }
+      } else if (type === 'day') {
+        if (data.error) {
+          html += '<p style="color:#f44336;">Analysis failed for this day.</p>';
+          if (data.errorMessage) html += '<p class="detail-summary">' + escHtml(data.errorMessage) + '</p>';
+        } else {
+          html += '<div class="detail-section">';
+          html += '<div class="detail-section-label">Score</div>';
+          html += '<span>' + scoreBadge(data.avgScore || 0) + '</span>';
+          html += ' <span style="color:#666;font-size:11px;">' + data.promptCount + ' prompts</span>';
+          html += '</div>';
+
+          html += '<div class="detail-section"><div class="detail-section-label">Top Patterns</div>';
+          html += renderPatternTags(data.topPatterns);
+          html += '</div>';
+
+          if (data.summary) {
+            html += '<div class="detail-section"><div class="detail-section-label">Summary</div>';
+            html += '<div class="detail-summary">' + escHtml(data.summary) + '</div></div>';
+          }
+
+          if (data.suggestions && data.suggestions.length > 0) {
+            html += '<div class="detail-section"><div class="detail-section-label">Suggestions</div>';
+            for (const s of data.suggestions) {
+              html += '<div style="margin-bottom:10px;">';
+              html += '<div style="color:#ccc;font-size:12px;margin-bottom:4px;">' + escHtml(s.text) + '</div>';
+              if (s.before) html += '<div style="color:#f44336;font-size:11px;margin-bottom:2px;">&#x2716; ' + escHtml(s.before) + '</div>';
+              if (s.after) html += '<div style="color:#4caf50;font-size:11px;">&#x2714; ' + escHtml(s.after) + '</div>';
+              html += '</div>';
+            }
+            html += '</div>';
           }
         }
       } else {
@@ -340,21 +401,32 @@ function buildStatusResponse(): object {
 function buildPatternsResponse(): object {
   ensureDirectories();
   const { weeklyFiles, monthlyFiles } = getDrmSummary();
-  // Serialize only what the UI needs; strip large daily.days detail for bandwidth
-  const weekly = weeklyFiles.map(w => {
-    if (w.detail === 'compressed') {
-      return { week: w.week, detail: 'compressed', avgScore: w.avgScore, promptCount: w.promptCount, topPatterns: w.topPatterns };
+
+  // Collect individual day records from daily-detail weekly files (DAYS section)
+  const allDays: Array<{ date: string; avgScore: number; promptCount: number; error?: boolean }> = [];
+  for (const w of weeklyFiles) {
+    if (w.detail !== 'daily') continue;
+    for (const [date, d] of Object.entries((w as WeeklyRecordDaily).days)) {
+      allDays.push({ date, avgScore: d.avgScore, promptCount: d.promptCount, error: d.error });
     }
-    // daily — compute aggregate for table display
-    const days = Object.values((w as WeeklyRecordDaily).days);
-    const totalPrompts = days.reduce((s, d) => s + d.promptCount, 0);
-    const avgScore = totalPrompts > 0
-      ? days.reduce((s, d) => s + d.avgScore * d.promptCount, 0) / totalPrompts
-      : 0;
-    return { week: w.week, detail: 'daily', avgScore, promptCount: totalPrompts };
-  });
+  }
+  // Sort descending by date, take last 7 analyzed days
+  allDays.sort((a, b) => b.date.localeCompare(a.date));
+  const days = allDays.slice(0, 7);
+
+  // WEEKLY section: compressed records only (daily-detail days are surfaced in DAYS)
+  const weekly = weeklyFiles
+    .filter(w => w.detail === 'compressed')
+    .map(w => ({
+      week: w.week,
+      detail: 'compressed',
+      avgScore: (w as WeeklyRecordCompressed).avgScore,
+      promptCount: (w as WeeklyRecordCompressed).promptCount,
+      topPatterns: (w as WeeklyRecordCompressed).topPatterns,
+    }));
+
   const monthly: MonthlyRecord[] = monthlyFiles;
-  return { weekly, monthly };
+  return { days, weekly, monthly };
 }
 
 function buildLastResponse(): object {
@@ -372,6 +444,10 @@ function buildDetailResponse(type: string, id: string): object {
     return record;
   } else if (type === 'month') {
     const record = getMonthlyDetail(id);
+    if (!record) return { error: 'Not found' };
+    return record;
+  } else if (type === 'day') {
+    const record = getDayDetail(id);
     if (!record) return { error: 'Not found' };
     return record;
   }

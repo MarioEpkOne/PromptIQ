@@ -128,6 +128,7 @@ export function upsertDayInWeekly(analysis: DayAnalysis): void {
     avgScore: analysis.avgScore,
     topPatterns: analysis.patterns.map(p => p.id),
     summary: analysis.summary,
+    suggestions: analysis.suggestions,
   };
 
   if (!existing || existing.detail === 'daily') {
@@ -492,6 +493,18 @@ export function getWeeklyDetail(week: string): WeeklyRecord | null {
 
 export function getMonthlyDetail(month: string): MonthlyRecord | null {
   return readMonthly(month);
+}
+
+/**
+ * Returns the WeekDayRecord for a specific date, or null if not found.
+ * Looks up the weekly file that contains the date.
+ * Returns null if the week has been compressed (daily detail gone).
+ */
+export function getDayDetail(date: string): WeekDayRecord | null {
+  const week = isoWeekLabel(date);
+  const record = readWeekly(week);
+  if (!record || record.detail !== 'daily') return null;
+  return (record as WeeklyRecordDaily).days[date] ?? null;
 }
 
 export function getDrmSummary(): {
