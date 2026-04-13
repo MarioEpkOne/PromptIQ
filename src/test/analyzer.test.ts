@@ -134,10 +134,9 @@ describe('analyzer', () => {
     );
   });
 
-  it('passes historyContext to buildSystemPrompt (history section appears in system prompt)', async () => {
-    // The mock for buildHistoryContext is implicit: no weekly/monthly files exist in this test,
-    // so buildHistoryContext returns '' and the system prompt omits the history section.
-    // We verify this by checking the system prompt does NOT contain '## Historical Context'.
+  it('does not inject historical context into system prompt', async () => {
+    // buildHistoryContext is no longer called from analyzeToday() — history injection was removed.
+    // Verify the system prompt does NOT contain '## Historical Context'.
     const Anthropic = (await import('@anthropic-ai/sdk')).default as jest.MockedClass<
       typeof import('@anthropic-ai/sdk').default
     >;

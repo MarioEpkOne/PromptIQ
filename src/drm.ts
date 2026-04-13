@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { promptiqDir, readEntriesForDate, deleteDailyFile, listDailyDates } from './logger.js';
+import { synthesizeWeek } from './analyzer.js';
 import type {
   DayAnalysis,
   WeeklyRecord,
@@ -319,7 +320,13 @@ export async function runRollup(): Promise<void> {
       .slice(0, 3)
       .map(([id]) => id);
 
-    const summaries = days.map(d => d.summary).filter(Boolean).join(' ');
+    let summaries: string;
+    try {
+      summaries = await synthesizeWeek(week, dailyRecord.days);
+    } catch {
+      console.warn('[PromptIQ] synthesizeWeek() threw unexpectedly — using fallback');
+      summaries = days.map(d => d.summary).filter(Boolean).join(' ');
+    }
 
     const compressed: WeeklyRecordCompressed = {
       week,

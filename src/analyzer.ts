@@ -1,20 +1,18 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { LogEntry, Rubric, DayAnalysis, PromptScore, Pattern, Suggestion } from './types.js';
-import { buildHistoryContext } from './drm.js';
+import type { LogEntry, Rubric, DayAnalysis, PromptScore, Pattern, Suggestion, WeekDayRecord } from './types.js';
 
 /**
  * Builds the system prompt for the Anthropic API call.
  * Includes the full rubric text so the LLM has a stable reference point.
  * Optionally includes historical context from DRM.
  */
-function buildSystemPrompt(rubric: Rubric, historyContext: string): string {
-  const historySec = historyContext ? `\n${historyContext}\n` : '';
+function buildSystemPrompt(rubric: Rubric): string {
   return `You are PromptIQ, a prompt quality analyzer. Your job is to evaluate prompts sent to an AI coding assistant.
 
 You will be given a batch of prompts and a rubric. Evaluate each prompt against the rubric criteria, identify recurring patterns, and suggest improvements.
 
 ## Rubric
-${rubric.rawText}${historySec}
+${rubric.rawText}
 Rules:
 - score is a weighted composite 0-1 based on rubric weights
 - Return exactly 3 suggestions (the most impactful ones)
@@ -28,7 +26,10 @@ Rules:
  */
 function buildUserMessage(entries: LogEntry[], date: string): string {
   const promptList = entries
-    .map((e, i) => `${i + 1}. ${e.prompt}`)
+    .map((e, i) => {
+      const text = e.prompt.length > 400 ? e.prompt.slice(0, 397) + '...' : e.prompt;
+      return `${i + 1}. ${text}`;
+    })
     .join('\n');
 
   return `Date: ${date}
@@ -119,13 +120,12 @@ export async function analyzeToday(
   }
 
   const client = new Anthropic({ apiKey });
-  const historyContext = buildHistoryContext();
-  const systemPrompt = buildSystemPrompt(rubric, historyContext);
+  const systemPrompt = buildSystemPrompt(rubric);
   const userMessage = buildUserMessage(entries, date);
 
   const response = await client.messages.create({
-    model: 'claude-opus-4-5',
-    max_tokens: 4096,
+    model: 'claude-sonnet-4-6',
+    max_tokens: 3000,
     system: systemPrompt,
     messages: [{ role: 'user', content: userMessage }],
     tools: [REPORT_ANALYSIS_TOOL],
@@ -163,4 +163,62 @@ export async function analyzeToday(
     suggestions,
     summary,
   };
+}
+
+/**
+ * Synthesizes a weekly narrative from 7 daily summaries using the LLM.
+ * Returns a plain-text summary string (not tool_use — simpler format suffices).
+ *
+ * On any failure (API error, missing key, empty days), returns a fallback string
+ * (joined daily summaries) and NEVER throws.
+ */
+export async function synthesizeWeek(
+  week: string,
+  days: Record<string, WeekDayRecord>,
+): Promise<string> {
+  const dayEntries = Object.entries(days).sort(([a], [b]) => a.localeCompare(b));
+
+  // Fallback: join existing summaries (same as current mechanical behavior)
+  const fallback = dayEntries
+    .map(([, d]) => d.summary)
+    .filter(Boolean)
+    .join(' ');
+
+  if (dayEntries.length === 0) {
+    return fallback;
+  }
+
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return fallback;
+  }
+
+  try {
+    const client = new Anthropic({ apiKey });
+
+    const systemPrompt = `You are PromptIQ. Synthesize the following daily prompt-quality summaries for ${week} into one coherent 2-4 sentence weekly narrative. Focus on trends, persistent weaknesses, and any notable improvement. Return only the narrative text — no headers, no bullets.`;
+
+    const userLines = dayEntries
+      .map(([date, d]) =>
+        `${date}: ${d.promptCount} prompts, avg score ${d.avgScore.toFixed(2)}${d.summary ? ' — ' + d.summary : ''}`,
+      )
+      .join('\n');
+
+    const response = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 512,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userLines }],
+    });
+
+    const textBlock = response.content.find(b => b.type === 'text');
+    if (textBlock && textBlock.type === 'text' && textBlock.text.trim()) {
+      return textBlock.text.trim();
+    }
+
+    return fallback;
+  } catch {
+    console.warn('[PromptIQ] synthesizeWeek() failed — using concatenated summaries as fallback');
+    return fallback;
+  }
 }
