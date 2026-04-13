@@ -17,6 +17,7 @@ You will be given a batch of prompts and a rubric. Evaluate each prompt against 
 ${rubric.rawText}${historySec}
 Rules:
 - score is a weighted composite 0-1 based on rubric weights
+- In the scores array, use the prompt's 1-based index (as a string) for the prompt field — do NOT repeat the full prompt text
 - Return exactly 3 suggestions (the most impactful ones)
 - patterns must include frequency (count of affected prompts)
 - summary should be 2-4 sentences suitable for archival in long-term memory
@@ -50,10 +51,11 @@ const REPORT_ANALYSIS_TOOL: Anthropic.Tool = {
     properties: {
       scores: {
         type: 'array',
+        description: 'One entry per prompt. Use the prompt index (1-based) as the prompt field to save tokens.',
         items: {
           type: 'object',
           properties: {
-            prompt: { type: 'string' },
+            prompt: { type: 'string', description: 'Prompt index as string, e.g. "1", "2"' },
             score: { type: 'number' },
             weakestCriterion: { type: 'string' },
           },
@@ -125,7 +127,7 @@ export async function analyzeToday(
 
   const response = await client.messages.create({
     model: 'claude-opus-4-5',
-    max_tokens: 4096,
+    max_tokens: 8192,
     system: systemPrompt,
     messages: [{ role: 'user', content: userMessage }],
     tools: [REPORT_ANALYSIS_TOOL],
