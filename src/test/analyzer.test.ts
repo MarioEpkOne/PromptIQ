@@ -36,6 +36,10 @@ jest.mock('@anthropic-ai/sdk', () => {
                   },
                 ],
                 summary: 'Test summary.',
+                mainTip: {
+                  text: 'Always specify expected output format.',
+                  why: 'Clear output format reduces ambiguity and improves response quality.',
+                },
               },
             },
           ],
@@ -84,6 +88,9 @@ describe('analyzer', () => {
     expect(result.patterns[0].id).toBe('missing-output-format');
     expect(result.suggestions).toHaveLength(1);
     expect(result.summary).toBe('Test summary.');
+    expect(result.mainTip).toBeDefined();
+    expect(result.mainTip.text).toBe('Always specify expected output format.');
+    expect(result.mainTip.why).toBe('Clear output format reduces ambiguity and improves response quality.');
   });
 
   it('avgScore is computed as weighted average of scores', async () => {
@@ -117,6 +124,52 @@ describe('analyzer', () => {
       expect(lastCall?.tools?.[0]?.name).toBe('report_analysis');
       expect(lastCall?.tool_choice).toEqual({ type: 'tool', name: 'report_analysis' });
     }
+  });
+
+  it('tool schema includes mainTip in required array with text/why string properties', async () => {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default as jest.MockedClass<
+      typeof import('@anthropic-ai/sdk').default
+    >;
+    const mockInstance = (Anthropic as unknown as jest.Mock).mock.results[0]?.value;
+    await analyzeToday(MOCK_ENTRIES, MOCK_RUBRIC, '2026-04-10');
+    if (mockInstance) {
+      const calls = mockInstance.messages.create.mock.calls;
+      const lastCall = calls[calls.length - 1]?.[0];
+      const schema = lastCall?.tools?.[0]?.input_schema;
+      expect(schema?.required).toContain('mainTip');
+      expect(schema?.properties?.mainTip?.type).toBe('object');
+      expect(schema?.properties?.mainTip?.properties?.text?.type).toBe('string');
+      expect(schema?.properties?.mainTip?.properties?.why?.type).toBe('string');
+    }
+  });
+
+  it('throws when mainTip is missing from tool_use response', async () => {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default as jest.MockedClass<
+      typeof import('@anthropic-ai/sdk').default
+    >;
+    (Anthropic as unknown as jest.Mock).mockImplementationOnce(() => ({
+      messages: {
+        create: jest.fn().mockResolvedValueOnce({
+          content: [
+            {
+              type: 'tool_use',
+              id: 'tu_no_tip',
+              name: 'report_analysis',
+              input: {
+                scores: [{ prompt: '1', score: 0.5, weakestCriterion: 'Clarity' }],
+                patterns: [],
+                suggestions: [],
+                summary: 'Test.',
+                // mainTip deliberately absent
+              },
+            },
+          ],
+        }),
+      },
+    }));
+    await expect(analyzeToday(MOCK_ENTRIES, MOCK_RUBRIC, '2026-04-10')).rejects.toThrow(
+      'missing mainTip',
+    );
   });
 
   it('throws if no tool_use block returned', async () => {

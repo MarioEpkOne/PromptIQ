@@ -24,6 +24,10 @@ jest.mock('@anthropic-ai/sdk', () => ({
                 { patternId: 'test-pattern', text: 'Be more specific', before: 'Prompt A', after: 'Detailed Prompt A' },
               ],
               summary: 'Integration test summary.',
+              mainTip: {
+                text: 'Add more context to each prompt.',
+                why: 'Context helps the AI understand the problem domain and produce better responses.',
+              },
             },
           },
         ],
@@ -85,6 +89,10 @@ describe('integration: analyze flow', () => {
     expect(weeklyContent.days[today].promptCount).toBe(3);
     // Total entries passed in were 5, so if promptCount is 3, controls were excluded
     expect(entries.length).toBe(5);
+    // mainTip must be persisted in the weekly record
+    expect(weeklyContent.days[today].mainTip).toBeDefined();
+    expect(weeklyContent.days[today].mainTip.text).toBe('Add more context to each prompt.');
+    expect(weeklyContent.days[today].mainTip.why).toBe('Context helps the AI understand the problem domain and produce better responses.');
   });
 
   it('8-day simulation: day-8 file rolls into weekly on rollup', async () => {

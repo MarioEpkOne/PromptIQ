@@ -135,6 +135,7 @@ export function upsertDayInWeekly(analysis: DayAnalysis): void {
     topPatterns: analysis.patterns.map(p => p.id),
     summary: analysis.summary,
     suggestions: analysis.suggestions,
+    mainTip: analysis.mainTip,
   };
 
   if (!existing || existing.detail === 'daily') {

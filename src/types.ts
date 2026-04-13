@@ -40,6 +40,12 @@ export interface Suggestion {
   after?: string;              // example of improved version
 }
 
+// The single most impactful improvement tip for the day
+export interface MainTip {
+  text: string;   // the actionable improvement (1-2 sentences)
+  why: string;    // the rationale for why this matters (1-2 sentences)
+}
+
 // Full analysis result for one day
 export interface DayAnalysis {
   date: string;                // YYYY-MM-DD
@@ -49,6 +55,7 @@ export interface DayAnalysis {
   patterns: Pattern[];
   suggestions: Suggestion[];
   summary: string;             // prose summary for DRM storage
+  mainTip: MainTip;            // the single most impactful improvement
 }
 
 // Per-day record stored inside a weekly file (detail: "daily")
@@ -58,6 +65,7 @@ export interface WeekDayRecord {
   topPatterns: string[];
   summary: string;
   suggestions?: Suggestion[];   // from DayAnalysis.suggestions
+  mainTip?: MainTip;            // optional — absent in records written before this feature
   // Error fields (only present when analysis failed)
   error?: boolean;
   errorType?: string;
