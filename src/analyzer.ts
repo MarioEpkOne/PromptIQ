@@ -33,7 +33,7 @@ Rules:
 - Return exactly 3 suggestions (the most impactful ones)
 - patterns must include frequency (count of affected prompts)
 - summary should be 2-4 sentences suitable for archival in long-term memory
-- mainTip must be the single highest-leverage improvement; why must explain the impact on prompt quality
+- mainTip must be the single highest-leverage improvement; why must explain how applying this improvement makes the AI agent respond better (faster understanding, fewer clarifying turns, higher quality output) — not why the score was low
 `;
 }
 
@@ -42,7 +42,7 @@ Rules:
  */
 function buildUserMessage(entries: LogEntry[], date: string): string {
   const promptList = entries
-    .map((e, i) => `${i + 1}. ${e.prompt}`)
+    .map((e, i) => `<prompt index="${i + 1}">\n${escapeXml(e.prompt)}\n</prompt>`)
     .join('\n');
 
   return `Date: ${date}
@@ -232,7 +232,7 @@ export async function synthesizeWeek(
 
     const userLines = dayEntries
       .map(([date, d]) =>
-        `${date}: ${d.promptCount} prompts, avg score ${d.avgScore.toFixed(2)}${d.summary ? ' — ' + d.summary : ''}`,
+        `<day date="${date}" prompts="${d.promptCount}" avg-score="${d.avgScore.toFixed(2)}">\n${escapeXml(d.summary ?? '')}\n</day>`,
       )
       .join('\n');
 

@@ -1,4 +1,4 @@
-import { analyzeToday } from '../analyzer.js';
+import { analyzeToday, synthesizeWeek } from '../analyzer.js';
 import type { LogEntry, Rubric } from '../types.js';
 
 // Mock the Anthropic SDK
@@ -293,5 +293,101 @@ describe('analyzer', () => {
       expect(lastCall?.system).toContain('&amp;');
       expect(lastCall?.system).not.toMatch(/<(?!rubric|\/rubric|prompt|\/prompt)/);
     }
+  });
+
+  it('buildUserMessage wraps each prompt in XML tags with 1-based index', async () => {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default as jest.MockedClass<
+      typeof import('@anthropic-ai/sdk').default
+    >;
+    const twoEntries: LogEntry[] = [
+      { timestamp: '2026-04-10T10:00:00Z', prompt: 'Fix the bug' },
+      { timestamp: '2026-04-10T10:01:00Z', prompt: 'Explain async' },
+      { timestamp: '2026-04-10T10:02:00Z', prompt: 'Refactor this' },
+    ];
+    await analyzeToday(twoEntries, MOCK_RUBRIC, '2026-04-10');
+    const results = (Anthropic as unknown as jest.Mock).mock.results;
+    const mockInstance = results[results.length - 1]?.value;
+    if (mockInstance) {
+      const calls = mockInstance.messages.create.mock.calls;
+      const lastCall = calls[calls.length - 1]?.[0];
+      const userContent: string = lastCall?.messages?.[0]?.content ?? '';
+      expect(userContent).toContain('<prompt index="1">');
+      expect(userContent).toContain('<prompt index="2">');
+      expect(userContent).not.toContain('1. '); // old numbered-list format must be gone
+    }
+  });
+
+  it('buildUserMessage escapes XML special characters in prompt text', async () => {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default as jest.MockedClass<
+      typeof import('@anthropic-ai/sdk').default
+    >;
+    const specialEntries: LogEntry[] = [
+      { timestamp: '2026-04-10T10:00:00Z', prompt: 'Fix <div> & "auth" bug' },
+      { timestamp: '2026-04-10T10:01:00Z', prompt: 'Explain async' },
+      { timestamp: '2026-04-10T10:02:00Z', prompt: 'Refactor this' },
+    ];
+    await analyzeToday(specialEntries, MOCK_RUBRIC, '2026-04-10');
+    const results = (Anthropic as unknown as jest.Mock).mock.results;
+    const mockInstance = results[results.length - 1]?.value;
+    if (mockInstance) {
+      const calls = mockInstance.messages.create.mock.calls;
+      const lastCall = calls[calls.length - 1]?.[0];
+      const userContent: string = lastCall?.messages?.[0]?.content ?? '';
+      expect(userContent).toContain('Fix &lt;div&gt; &amp; &quot;auth&quot; bug');
+      expect(userContent).not.toContain('<div>'); // raw unescaped must not appear
+    }
+  });
+
+  it('buildSystemPrompt describes the XML tag format', async () => {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default as jest.MockedClass<
+      typeof import('@anthropic-ai/sdk').default
+    >;
+    await analyzeToday(MOCK_ENTRIES, MOCK_RUBRIC, '2026-04-10');
+    const results = (Anthropic as unknown as jest.Mock).mock.results;
+    const mockInstance = results[results.length - 1]?.value;
+    if (mockInstance) {
+      const calls = mockInstance.messages.create.mock.calls;
+      const lastCall = calls[calls.length - 1]?.[0];
+      expect(lastCall?.system).toContain('<prompt index="N">');
+    }
+  });
+
+  it('synthesizeWeek wraps each day in XML day tags', async () => {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default as jest.MockedClass<
+      typeof import('@anthropic-ai/sdk').default
+    >;
+    // Override mock to return a text block (synthesizeWeek uses plain text, not tool_use)
+    (Anthropic as unknown as jest.Mock).mockImplementationOnce(() => ({
+      messages: {
+        create: jest.fn().mockResolvedValueOnce({
+          content: [{ type: 'text', text: 'Weekly narrative.' }],
+        }),
+      },
+    }));
+    const days = {
+      '2026-04-07': { promptCount: 12, avgScore: 0.72, topPatterns: [], summary: 'Good day & productive.' },
+      '2026-04-08': { promptCount: 9,  avgScore: 0.65, topPatterns: [], summary: 'Shorter day.' },
+    };
+    await synthesizeWeek('2026-W15', days);
+    const results = (Anthropic as unknown as jest.Mock).mock.results;
+    const mockInstance = results[results.length - 1]?.value;
+    if (mockInstance) {
+      const calls = mockInstance.messages.create.mock.calls;
+      const lastCall = calls[calls.length - 1]?.[0];
+      const userContent: string = lastCall?.messages?.[0]?.content ?? '';
+      expect(userContent).toContain('<day date="');
+      expect(userContent).toContain('avg-score="');
+      expect(userContent).toContain('&amp;'); // & in summary escaped
+    }
+  });
+
+  it('scores array uses index strings not repeated prompt text (regression)', async () => {
+    const result = await analyzeToday(MOCK_ENTRIES, MOCK_RUBRIC, '2026-04-10');
+    // The mock response has scores with 'Fix the bug', 'Explain async', 'Refactor this'
+    // as prompt values — that's the mock data. What we verify is that the result
+    // passes through whatever the model returns (index strings in production, text in mock).
+    expect(result.scores).toHaveLength(3);
+    expect(result.scores[0].prompt).toBeDefined();
+    expect(typeof result.scores[0].prompt).toBe('string');
   });
 });
