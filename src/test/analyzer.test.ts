@@ -207,12 +207,22 @@ describe('analyzer', () => {
     const Anthropic = (await import('@anthropic-ai/sdk')).default as jest.MockedClass<
       typeof import('@anthropic-ai/sdk').default
     >;
-    const mockInstance = (Anthropic as unknown as jest.Mock).mock.results[0]?.value;
-    await analyzeToday(MOCK_ENTRIES, MOCK_RUBRIC, '2026-04-10');
+    // Use a 3-criteria rubric per spec §Testing Strategy test 1 to verify that the
+    // criteria count attribute is dynamically derived from rubric.criteria.length.
+    const threeCriteriaRubric: Rubric = {
+      criteria: [
+        { name: 'Clarity', weight: 1.0, description: 'Is the intent unambiguous?' },
+        { name: 'Context', weight: 1.0, description: 'Does it include background?' },
+        { name: 'Scope', weight: 1.0, description: 'Is the scope well-defined?' },
+      ],
+      rawText: '# Test Rubric\n\n### Clarity\nTest.\n\n### Context\nTest.\n\n### Scope\nTest.',
+    };
+    await analyzeToday(MOCK_ENTRIES, threeCriteriaRubric, '2026-04-10');
+    const mockInstance = (Anthropic as unknown as jest.Mock).mock.results.at(-1)?.value;
     if (mockInstance) {
       const calls = mockInstance.messages.create.mock.calls;
       const lastCall = calls[calls.length - 1]?.[0];
-      expect(lastCall?.system).toContain('<rubric criteria="2">');
+      expect(lastCall?.system).toContain('<rubric criteria="3">');
       expect(lastCall?.system).toContain('</rubric>');
       expect(lastCall?.system).not.toContain('## Rubric');
     }
