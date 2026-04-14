@@ -1,8 +1,14 @@
 import * as http from 'http';
-import { readTodayEntries, ensureDirectories } from './logger.js';
-import { getDrmSummary, getWeeklyDetail, getMonthlyDetail, getDayDetail, findLastAnalysisDate } from './drm.js';
+import { ensureDirectories, listDailyDates, readEntriesForDate, readTodayEntries } from './logger.js';
+import { getDrmSummary, getWeeklyDetail, getMonthlyDetail, getDayDetail, findLastAnalysisDate, upsertDayInWeekly, upsertErrorInWeekly, runRollup } from './drm.js';
 import type { WeeklyRecord, WeeklyRecordDaily, WeeklyRecordCompressed, MonthlyRecord } from './types.js';
 import { analyzePromptSpot } from './spot-analyzer.js';
+import { analyzeToday } from './analyzer.js';
+import { loadRubric } from './rubric.js';
+import { classifyEntries, loadClassifierConfig } from './classifier.js';
+
+// Concurrency guard — prevents two simultaneous full analysis runs
+let analysisInProgress = false;
 
 // ---------------------------------------------------------------------------
 // Inline HTML dashboard (D2, D7: embedded template literal, no file I/O)
@@ -140,6 +146,21 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       font-size: 12px;
     }
     #analyzer-copy:hover { border-color: #5bc8f5; color: #5bc8f5; }
+    /* Analyze Today button */
+    #analyze-btn {
+      background: #5bc8f5;
+      color: #1a1a1a;
+      border: none;
+      padding: 6px 18px;
+      cursor: pointer;
+      border-radius: 3px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: bold;
+    }
+    #analyze-btn:disabled { background: #333; color: #666; cursor: default; }
+    .analyze-banner-ok  { background: #1a3d1a; color: #4caf50; border: 1px solid #4caf50; border-radius: 3px; padding: 10px 14px; font-size: 13px; }
+    .analyze-banner-err { background: #3d1a1a; color: #f44336; border: 1px solid #f44336; border-radius: 3px; padding: 10px 14px; font-size: 13px; }
   </style>
 </head>
 <body>
@@ -228,7 +249,27 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
             html += '<div class="stat-row warn">&#9888; ' + data.failedDates.length + ' day(s) failed to analyze: ' + data.failedDates.join(', ') + '</div>';
           }
         }
+        // Append analyze section below stat rows (always rendered)
+        html += '<div id="analyze-section" style="margin-top:20px;">';
+        html += '<button id="analyze-btn" disabled title="Not enough prompts yet (need 3)">Analyze</button>';
+        html += '<span id="analyze-spinner" style="display:none;color:#888;font-style:italic;margin-left:12px;">Analyzing\u2026</span>';
+        html += '</div>';
+        html += '<div id="analyze-result" style="margin-top:12px;display:none;"></div>';
+
         el.innerHTML = html || '<p class="empty">No data yet \u2014 run <code>promptiq analyze</code> to get started.</p>';
+
+        // Wire button: enable/disable based on todayCount, attach click handler
+        const btn = document.getElementById('analyze-btn');
+        if (btn && typeof data.todayCount === 'number') {
+          if (data.todayCount >= 3) {
+            btn.disabled = false;
+            btn.removeAttribute('title');
+          } else {
+            btn.disabled = true;
+            btn.title = 'Not enough prompts yet (need 3, have ' + data.todayCount + ')';
+          }
+          btn.addEventListener('click', function() { runAnalysis(data.todayCount); });
+        }
       } catch (e) {
         el.innerHTML = '<p class="empty">Failed to load status.</p>';
       }
@@ -608,6 +649,65 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         }
       });
     })();
+
+    async function runAnalysis(todayCount) {
+      var btn     = document.getElementById('analyze-btn');
+      var spinner = document.getElementById('analyze-spinner');
+      var result  = document.getElementById('analyze-result');
+
+      // Disable button, show spinner
+      btn.disabled = true;
+      result.style.display = 'none';
+      result.innerHTML = '';
+      spinner.textContent = 'Analyzing ' + todayCount + ' prompts\u2026';
+      spinner.style.display = 'inline';
+
+      try {
+        var res = await fetch('/api/run-analysis', { method: 'POST' });
+        var data = await res.json();
+
+        if (res.status === 409) {
+          result.className = 'analyze-banner-err';
+          result.textContent = 'Analysis already in progress \u2014 wait for it to finish.';
+          result.style.display = 'block';
+          return;
+        }
+        if (res.status === 503) {
+          result.className = 'analyze-banner-err';
+          result.textContent = 'ANTHROPIC_API_KEY is not set \u2014 restart the server after exporting it.';
+          result.style.display = 'block';
+          return;
+        }
+        if (res.status === 400) {
+          result.className = 'analyze-banner-err';
+          result.textContent = data.message || 'No prompts logged today.';
+          result.style.display = 'block';
+          return;
+        }
+        if (!res.ok || data.error) {
+          result.className = 'analyze-banner-err';
+          result.textContent = data.message || data.error || 'Analysis failed.';
+          result.style.display = 'block';
+          return;
+        }
+        // Success: show green banner + refresh status tab
+        var scorePct = Math.round((data.avgScore || 0) * 100);
+        result.className = 'analyze-banner-ok';
+        result.textContent = '\u2714 Analysis complete \u2014 score: ' + scorePct;
+        result.style.display = 'block';
+        loadStatus(); // refresh stat rows; this replaces innerHTML, re-mounting a fresh button
+      } catch (err) {
+        result.className = 'analyze-banner-err';
+        result.textContent = 'Network error \u2014 is the server running?';
+        result.style.display = 'block';
+      } finally {
+        spinner.style.display = 'none';
+        // If loadStatus() was called on success it rebuilds the DOM; re-enable only on non-success paths
+        // (success path: loadStatus() already renders a fresh enabled/disabled button)
+        var stillBtn = document.getElementById('analyze-btn');
+        if (stillBtn) stillBtn.disabled = false;
+      }
+    }
   </script>
 </body>
 </html>`;
@@ -758,6 +858,102 @@ export function startServer(port: number): http.Server {
           sendJson(res, 500, { error: String(err) });
         }
       });
+      return;
+    }
+
+    // POST /api/run-analysis — full catchup + today's analysis, triggered from UI
+    if (method === 'POST' && url === '/api/run-analysis') {
+      // 1. API key check
+      if (!process.env.ANTHROPIC_API_KEY) {
+        sendJson(res, 503, { error: 'no_api_key', message: "ANTHROPIC_API_KEY is not set — restart the server after exporting it." });
+        return;
+      }
+
+      // 2. Concurrency guard
+      if (analysisInProgress) {
+        sendJson(res, 409, { error: 'already_running', message: 'Analysis already in progress.' });
+        return;
+      }
+
+      // 3. Check today has at least 1 raw prompt
+      const todayEntries = readTodayEntries();
+      if (todayEntries.length < 1) {
+        sendJson(res, 400, { error: 'no_prompts', message: 'No prompts logged today.' });
+        return;
+      }
+
+      analysisInProgress = true;
+      (async () => {
+        try {
+          const today = new Date().toISOString().split('T')[0];
+          const rubric = loadRubric();
+          const classifierConfig = loadClassifierConfig();
+
+          // 4. Catchup pass: replicate `promptiq catchup` logic for past unanalyzed days
+          const analyzedDates = new Set<string>();
+          const compressedRanges: Array<{ start: string; end: string }> = [];
+          const { weeklyFiles } = getDrmSummary();
+          for (const w of weeklyFiles) {
+            if (w.detail === 'daily') {
+              for (const [date, d] of Object.entries((w as WeeklyRecordDaily).days)) {
+                if (!d.error) analyzedDates.add(date);
+              }
+            } else {
+              compressedRanges.push({ start: (w as WeeklyRecordCompressed).startDate, end: (w as WeeklyRecordCompressed).endDate });
+            }
+          }
+          const isHandled = (date: string): boolean =>
+            analyzedDates.has(date) ||
+            compressedRanges.some(r => date >= r.start && date <= r.end);
+
+          const dailyDates = listDailyDates();
+          const missedDates = dailyDates.filter(date => date < today && !isHandled(date));
+          let caughtUp = 0;
+
+          for (const date of missedDates) {
+            const entries = readEntriesForDate(date);
+            const { taskEntries } = classifyEntries(entries, classifierConfig);
+            if (taskEntries.length < 3) continue; // skip — too few, not an error
+            try {
+              const analysis = await analyzeToday(entries, rubric, date);
+              upsertDayInWeekly(analysis);
+              caughtUp++;
+            } catch (err) {
+              const errorMessage = String(err);
+              const errorType = err instanceof Error ? err.constructor.name : 'UnknownError';
+              try { upsertErrorInWeekly(date, entries.length, errorType, errorMessage); } catch { /* ignore */ }
+              // today's analysis still proceeds — edge case: catchup day fails
+            }
+          }
+
+          // 5. Today's analysis
+          const { taskEntries: todayTaskEntries } = classifyEntries(todayEntries, classifierConfig);
+          if (todayTaskEntries.length < 3) {
+            sendJson(res, 200, {
+              error: 'too_few_prompts',
+              message: `Not enough task prompts today (need at least 3). ${todayTaskEntries.length} logged.`,
+              count: todayTaskEntries.length,
+            });
+            return;
+          }
+
+          const analysis = await analyzeToday(todayEntries, rubric, today);
+          upsertDayInWeekly(analysis);
+
+          // 6. Rollup — includes all newly caught-up days + today
+          await runRollup();
+
+          sendJson(res, 200, {
+            avgScore: analysis.avgScore,
+            promptCount: analysis.promptCount,
+            caughtUp,
+          });
+        } catch (err) {
+          sendJson(res, 500, { error: 'api_error', message: String(err) });
+        } finally {
+          analysisInProgress = false;
+        }
+      })();
       return;
     }
 
