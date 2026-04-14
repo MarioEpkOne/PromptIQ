@@ -2,6 +2,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
+// Mock synthesizeWeek so runRollup compression tests never make real Anthropic API calls.
+// Without this mock, compression tests take 3-5 s waiting on a network timeout, which
+// intermittently exceeds Jest's 5 s default and causes flaky failures.
+jest.mock('../analyzer.js', () => ({
+  analyzeToday: jest.fn(),
+  synthesizeWeek: jest.fn().mockResolvedValue('Mocked week summary.'),
+}));
+
 describe('drm', () => {
   let tempDir: string;
 

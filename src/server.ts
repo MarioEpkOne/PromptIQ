@@ -241,8 +241,14 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         if (data.error) {
           html = '<p class="empty">No data yet \u2014 run <code>promptiq analyze</code> to get started.</p>';
         } else {
+          var lastAnalysisStr = data.lastAnalysisDate
+            ? data.lastAnalysisTime
+              ? data.lastAnalysisDate + ' at ' + new Date(data.lastAnalysisTime).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})
+              : data.lastAnalysisDate
+            : 'never';
           html += '<div class="stat-row"><span class="stat-label">Today&#39;s prompts logged:</span><span class="stat-value">' + data.todayCount + '</span></div>';
-          html += '<div class="stat-row"><span class="stat-label">Last analysis date:</span><span class="stat-value">' + (data.lastAnalysisDate || 'never') + '</span></div>';
+          html += '<div class="stat-row"><span class="stat-label">Last analysis run:</span><span class="stat-value">' + lastAnalysisStr + '</span></div>';
+          html += '<div class="stat-row"><span class="stat-label">Prompts since last analysis:</span><span class="stat-value">' + data.sinceCount + '</span></div>';
           html += '<div class="stat-row"><span class="stat-label">Weekly summaries stored:</span><span class="stat-value">' + data.weeklyCount + '</span></div>';
           html += '<div class="stat-row"><span class="stat-label">Monthly summaries stored:</span><span class="stat-value">' + data.monthlyCount + '</span></div>';
           if (data.failedDates && data.failedDates.length > 0) {
@@ -733,9 +739,20 @@ function buildStatusResponse(): object {
   }
   failedDates.sort();
 
+  // Count prompts logged after the last analysis date (sinceCount)
+  let sinceCount = 0;
+  const allDates = listDailyDates();
+  for (const date of allDates) {
+    if (!lastAnalysisDate || date > lastAnalysisDate) {
+      sinceCount += readEntriesForDate(date).length;
+    }
+  }
+
   return {
     todayCount: entries.length,
+    sinceCount,
     lastAnalysisDate,
+    lastAnalysisTime: null,
     weeklyCount: weeklyFiles.length,
     monthlyCount: monthlyFiles.length,
     failedDates,

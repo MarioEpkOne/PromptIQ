@@ -12,6 +12,12 @@ jest.mock('../spot-analyzer.js', () => ({
   }),
 }));
 
+// Mock analyzer at module scope so it never leaks into other test files
+jest.mock('../analyzer.js', () => ({
+  analyzeToday: jest.fn(),
+  synthesizeWeek: jest.fn(),
+}));
+
 function makeRequest(
   server: http.Server,
   method: string,
@@ -198,20 +204,19 @@ describe('POST /api/run-analysis', () => {
     process.env.PROMPTIQ_HOME = tempDir;
     process.env.ANTHROPIC_API_KEY = 'sk-test-key';
     jest.resetModules();
-    // Mock analyzeToday to avoid real API calls
-    jest.mock('../analyzer.js', () => ({
-      analyzeToday: jest.fn().mockResolvedValue({
-        date: new Date().toISOString().split('T')[0],
-        promptCount: 3,
-        avgScore: 0.72,
-        scores: [],
-        patterns: [],
-        suggestions: [],
-        summary: 'Test summary.',
-        mainTip: { text: 'Test tip.', why: 'Test why.' },
-      }),
-      synthesizeWeek: jest.fn().mockResolvedValue('Test week summary.'),
-    }));
+    // Require analyzer after resetModules so we get the fresh mock instance that server.js will also use
+    const { analyzeToday, synthesizeWeek } = require('../analyzer.js');
+    (analyzeToday as jest.Mock).mockResolvedValue({
+      date: new Date().toISOString().split('T')[0],
+      promptCount: 3,
+      avgScore: 0.72,
+      scores: [],
+      patterns: [],
+      suggestions: [],
+      summary: 'Test summary.',
+      mainTip: { text: 'Test tip.', why: 'Test why.' },
+    });
+    (synthesizeWeek as jest.Mock).mockResolvedValue('Test week summary.');
     const { startServer } = require('../server.js');
     server = startServer(0);
     server.once('listening', done);
@@ -220,7 +225,6 @@ describe('POST /api/run-analysis', () => {
   afterEach(done => {
     delete process.env.PROMPTIQ_HOME;
     delete process.env.ANTHROPIC_API_KEY;
-    jest.unmock('../analyzer.js');
     const fs = require('fs') as typeof import('fs');
     fs.rmSync(tempDir, { recursive: true, force: true });
     server.close(done);
