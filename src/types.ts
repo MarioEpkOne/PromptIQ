@@ -105,3 +105,26 @@ export interface MonthlyRecord {
   patternFrequency: Record<string, number>;  // tracks cross-week occurrence counts
   summary: string;
 }
+
+// ─── Spot Analyzer types ───────────────────────────────────────────────────
+
+export interface CriterionScore {
+  criterion: string;  // e.g. "Specificity" — from rubric H3 heading
+  score: number;      // 0–1
+  weight: number;     // from rubric, e.g. 0.30
+}
+
+export interface SpotSuggestion {
+  criterion: string;  // which rubric criterion this targets
+  issue: string;      // what's weak (1 sentence)
+  fix: string;        // what to change (1 sentence)
+}
+
+export interface SpotAnalysis {
+  overallScore: number;               // weighted mean of criterion scores
+  criterionScores: CriterionScore[];  // one entry per rubric criterion
+  patterns: string[];                 // detected pattern ids
+  suggestions: SpotSuggestion[];      // max 3, ordered by impact
+  improvedPrompt: string;             // full rewritten prompt
+  improvementReasons: string[];       // parallel to suggestions[], one line per change
+}
