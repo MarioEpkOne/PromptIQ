@@ -394,3 +394,114 @@ describe('mcp --setup integration', () => {
     });
   }, 15000);
 });
+
+// -------------------------------------------------------------------------
+// Integration: MCP JSON-RPC dispatch over stdio
+// -------------------------------------------------------------------------
+
+describe('mcp JSON-RPC dispatch', () => {
+  const cliPath = require('path').resolve(__dirname, '../../dist/cli.js');
+
+  function sendJsonRpc(
+    toolName: string,
+    onData: (data: string) => void,
+    onExit: () => void,
+  ): import('child_process').ChildProcess {
+    const { spawn } = require('child_process') as typeof import('child_process');
+    const proc = spawn('node', [cliPath, 'mcp'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    const request = JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name: toolName, arguments: {} },
+    }) + '\n';
+
+    let stdout = '';
+    proc.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+      onData(stdout);
+    });
+
+    proc.on('exit', onExit);
+
+    proc.stdin.write(request);
+
+    return proc;
+  }
+
+  // Test 14: known tool (get_status) returns a valid JSON-RPC result with XML content
+  it('tools/call for get_status returns a valid JSON-RPC result containing XML', (done) => {
+    let finished = false;
+
+    const proc = sendJsonRpc(
+      'get_status',
+      (stdout) => {
+        // Wait until we have a complete newline-terminated JSON line
+        const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
+        for (const line of lines) {
+          let parsed: Record<string, unknown>;
+          try {
+            parsed = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (finished) return;
+          finished = true;
+          proc.kill();
+
+          expect(parsed).toHaveProperty('result');
+          const result = parsed['result'] as Record<string, unknown>;
+          expect(result).toHaveProperty('content');
+          const content = result['content'] as Array<{ type: string; text: string }>;
+          expect(Array.isArray(content)).toBe(true);
+          expect(content[0]).toHaveProperty('type', 'text');
+          expect(content[0].text).toContain('<status>');
+          done();
+        }
+      },
+      () => {
+        if (!finished) {
+          finished = true;
+          done(new Error('MCP server exited before responding'));
+        }
+      },
+    );
+  }, 15000);
+
+  // Test 15: unknown tool returns isError: true in the JSON-RPC response
+  it('tools/call for unknown tool returns isError: true', (done) => {
+    let finished = false;
+
+    const proc = sendJsonRpc(
+      'get_unknown',
+      (stdout) => {
+        const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
+        for (const line of lines) {
+          let parsed: Record<string, unknown>;
+          try {
+            parsed = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (finished) return;
+          finished = true;
+          proc.kill();
+
+          expect(parsed).toHaveProperty('result');
+          const result = parsed['result'] as Record<string, unknown>;
+          expect(result).toHaveProperty('isError', true);
+          done();
+        }
+      },
+      () => {
+        if (!finished) {
+          finished = true;
+          done(new Error('MCP server exited before responding'));
+        }
+      },
+    );
+  }, 15000);
+});
