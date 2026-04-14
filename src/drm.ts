@@ -137,6 +137,7 @@ export function upsertDayInWeekly(analysis: DayAnalysis): void {
     summary: analysis.summary,
     suggestions: analysis.suggestions,
     mainTip: analysis.mainTip,
+    analyzedAt: new Date().toISOString(),
   };
 
   if (!existing || existing.detail === 'daily') {

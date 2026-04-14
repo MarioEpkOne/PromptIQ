@@ -962,8 +962,12 @@ export function startServer(port: number): http.Server {
             }
           }
 
-          // 5. Today's analysis
-          const { taskEntries: todayTaskEntries } = classifyEntries(todayEntries, classifierConfig);
+          // 5. Today's analysis — only entries logged since the last analysis run
+          const existingToday = getDayDetail(today);
+          const newEntries = existingToday?.analyzedAt
+            ? todayEntries.filter(e => e.timestamp > existingToday.analyzedAt!)
+            : todayEntries;
+          const { taskEntries: todayTaskEntries } = classifyEntries(newEntries, classifierConfig);
           if (todayTaskEntries.length < 3) {
             sendJson(res, 200, {
               error: 'too_few_prompts',
@@ -973,7 +977,7 @@ export function startServer(port: number): http.Server {
             return;
           }
 
-          const analysis = await analyzeToday(todayEntries, rubric, today);
+          const analysis = await analyzeToday(newEntries, rubric, today);
           upsertDayInWeekly(analysis);
 
           // 6. Rollup — includes all newly caught-up days + today
