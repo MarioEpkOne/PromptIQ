@@ -15,6 +15,7 @@ import {
 } from './renderer.js';
 import type { WeeklyRecordDaily, WeeklyRecordCompressed } from './types.js';
 import { startServer } from './server.js';
+import { startMcpServer } from './mcp.js';
 
 // In CommonJS, __dirname is available as a global
 // Resolve assets dir relative to compiled output (dist/) or source (src/)
@@ -501,6 +502,34 @@ program
       console.error('If crontab is not available, install cron: sudo apt-get install cron');
       process.exit(1);
     }
+  });
+
+// ---------------------------------------------------------------------------
+// mcp
+// ---------------------------------------------------------------------------
+program
+  .command('mcp')
+  .description('Start MCP stdio server (for Claude Code integration)')
+  .option('--setup', 'Print the MCP config snippet to add to ~/.claude/settings.json')
+  .action(async (options: { setup?: boolean }) => {
+    if (options.setup) {
+      const binaryPath = require('path').resolve(process.argv[1]);
+      const config = {
+        mcpServers: {
+          promptiq: {
+            command: binaryPath,
+            args: ['mcp'],
+          },
+        },
+      };
+      console.log('Add this to your Claude Code MCP config (~/.claude/settings.json):\n');
+      console.log(JSON.stringify(config, null, 2));
+      console.log('\nThen restart Claude Code.');
+      return;
+    }
+
+    ensureDirectories();
+    await startMcpServer();
   });
 
 program.parse(process.argv);
