@@ -126,4 +126,71 @@ describe('analyzePromptSpot', () => {
       expect(lastCall?.tools?.[0]?.name).toBe('analyze_single_prompt');
     }
   });
+
+  it('analyzePromptSpot wraps rubric in XML tag with criteria count', async () => {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default as jest.MockedClass<
+      typeof import('@anthropic-ai/sdk').default
+    >;
+    await analyzePromptSpot('Fix the login bug');
+    const mockInstance = (Anthropic as unknown as jest.Mock).mock.results.at(-1)?.value;
+    if (mockInstance) {
+      const lastCall = mockInstance.messages.create.mock.calls.at(-1)?.[0];
+      expect(lastCall?.system).toContain('<rubric criteria="2">');
+      expect(lastCall?.system).toContain('</rubric>');
+      expect(lastCall?.system).not.toContain('RUBRIC:');
+    }
+  });
+
+  it('analyzePromptSpot wraps analyzed prompt in XML tag', async () => {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default as jest.MockedClass<
+      typeof import('@anthropic-ai/sdk').default
+    >;
+    await analyzePromptSpot('Fix the login bug');
+    const mockInstance = (Anthropic as unknown as jest.Mock).mock.results.at(-1)?.value;
+    if (mockInstance) {
+      const lastCall = mockInstance.messages.create.mock.calls.at(-1)?.[0];
+      const content = lastCall?.messages?.[0]?.content as string;
+      expect(content).toContain('<prompt index="1">');
+      expect(content).toContain('</prompt>');
+      expect(content).not.toContain('"Fix the login bug"');
+    }
+  });
+
+  it('analyzePromptSpot escapes XML special characters in analyzed prompt', async () => {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default as jest.MockedClass<
+      typeof import('@anthropic-ai/sdk').default
+    >;
+    await analyzePromptSpot('Fix <div> & "auth" bug');
+    const mockInstance = (Anthropic as unknown as jest.Mock).mock.results.at(-1)?.value;
+    if (mockInstance) {
+      const lastCall = mockInstance.messages.create.mock.calls.at(-1)?.[0];
+      const content = lastCall?.messages?.[0]?.content as string;
+      expect(content).toContain('&lt;div&gt;');
+      expect(content).toContain('&amp;');
+      expect(content).toContain('&quot;auth&quot;');
+      expect(content).not.toContain('<div>');
+      expect(content).not.toContain(' & ');
+    }
+  });
+
+  it('analyzePromptSpot escapes XML special characters in rubric text', async () => {
+    const { loadRubric } = await import('../rubric.js');
+    (loadRubric as jest.Mock).mockReturnValueOnce({
+      criteria: [
+        { name: 'Clarity', weight: 1.0, description: 'Test.' },
+        { name: 'Context', weight: 1.0, description: 'Test.' },
+      ],
+      rawText: 'use precision & recall',
+    });
+    const Anthropic = (await import('@anthropic-ai/sdk')).default as jest.MockedClass<
+      typeof import('@anthropic-ai/sdk').default
+    >;
+    await analyzePromptSpot('test prompt');
+    const mockInstance = (Anthropic as unknown as jest.Mock).mock.results.at(-1)?.value;
+    if (mockInstance) {
+      const lastCall = mockInstance.messages.create.mock.calls.at(-1)?.[0];
+      expect(lastCall?.system).toContain('&amp;');
+      expect(lastCall?.system).not.toMatch(/use precision & recall/);
+    }
+  });
 });

@@ -227,4 +227,71 @@ describe('analyzer', () => {
       expect(userContent).not.toContain(longPrompt.slice(0, 397) + '...');
     }
   });
+
+  it('buildSystemPrompt wraps rubric in XML tag with criteria count', async () => {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default as jest.MockedClass<
+      typeof import('@anthropic-ai/sdk').default
+    >;
+    // Use a 3-criteria rubric per spec §Testing Strategy test 1 to verify that the
+    // criteria count attribute is dynamically derived from rubric.criteria.length.
+    const threeCriteriaRubric: Rubric = {
+      criteria: [
+        { name: 'Clarity', weight: 1.0, description: 'Is the intent unambiguous?' },
+        { name: 'Context', weight: 1.0, description: 'Does it include background?' },
+        { name: 'Scope', weight: 1.0, description: 'Is the scope well-defined?' },
+      ],
+      rawText: '# Test Rubric\n\n### Clarity\nTest.\n\n### Context\nTest.\n\n### Scope\nTest.',
+    };
+    await analyzeToday(MOCK_ENTRIES, threeCriteriaRubric, '2026-04-10');
+    const mockInstance = (Anthropic as unknown as jest.Mock).mock.results.at(-1)?.value;
+    if (mockInstance) {
+      const calls = mockInstance.messages.create.mock.calls;
+      const lastCall = calls[calls.length - 1]?.[0];
+      expect(lastCall?.system).toContain('<rubric criteria="3">');
+      expect(lastCall?.system).toContain('</rubric>');
+      expect(lastCall?.system).not.toContain('## Rubric');
+    }
+  });
+
+  it('buildSystemPrompt escapes XML special characters in rubric text', async () => {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default as jest.MockedClass<
+      typeof import('@anthropic-ai/sdk').default
+    >;
+    const escapedRubric: Rubric = {
+      criteria: [
+        { name: 'Clarity', weight: 1.0, description: 'Is the intent unambiguous?' },
+        { name: 'Context', weight: 1.0, description: 'Does it include background?' },
+        { name: 'Precision', weight: 1.0, description: 'Use precision & recall' },
+      ],
+      rawText: 'score < 0.5 & precision',
+    };
+    (Anthropic as unknown as jest.Mock).mockImplementationOnce(() => ({
+      messages: {
+        create: jest.fn().mockResolvedValueOnce({
+          content: [
+            {
+              type: 'tool_use',
+              id: 'tu_escape_test',
+              name: 'report_analysis',
+              input: {
+                scores: [{ prompt: '1', score: 0.5, weakestCriterion: 'Clarity' }],
+                patterns: [],
+                suggestions: [],
+                summary: 'Test.',
+                mainTip: { text: 'Test tip.', why: 'Test why.' },
+              },
+            },
+          ],
+        }),
+      },
+    }));
+    await analyzeToday(MOCK_ENTRIES, escapedRubric, '2026-04-10');
+    const mockInstance = (Anthropic as unknown as jest.Mock).mock.results.at(-1)?.value;
+    if (mockInstance) {
+      const lastCall = mockInstance.messages.create.mock.calls.at(-1)?.[0];
+      expect(lastCall?.system).toContain('&lt;');
+      expect(lastCall?.system).toContain('&amp;');
+      expect(lastCall?.system).not.toMatch(/<(?!rubric|\/rubric|prompt|\/prompt)/);
+    }
+  });
 });

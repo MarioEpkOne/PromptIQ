@@ -3,6 +3,18 @@ import type { LogEntry, Rubric, DayAnalysis, PromptScore, Pattern, Suggestion, M
 import { classifyEntries, loadClassifierConfig } from './classifier.js';
 
 /**
+ * Escapes XML special characters in a string so it is safe to embed in an XML element.
+ * & must be replaced first to avoid double-escaping other sequences.
+ */
+function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+/**
  * Builds the system prompt for the Anthropic API call.
  * Includes the full rubric text so the LLM has a stable reference point.
  * Optionally includes historical context from DRM.
@@ -10,10 +22,11 @@ import { classifyEntries, loadClassifierConfig } from './classifier.js';
 function buildSystemPrompt(rubric: Rubric): string {
   return `You are PromptIQ, a prompt quality analyzer. Your job is to evaluate prompts sent to an AI coding assistant.
 
-You will be given a batch of prompts and a rubric. Evaluate each prompt against the rubric criteria, identify recurring patterns, and suggest improvements.
+You will be given a batch of prompts and a rubric. Each prompt is wrapped in a <prompt index="N"> tag — use the index attribute value as the reference when populating the scores array. Evaluate each prompt against the rubric criteria, identify recurring patterns, and suggest improvements.
 
-## Rubric
-${rubric.rawText}
+<rubric criteria="${rubric.criteria.length}">
+${escapeXml(rubric.rawText)}
+</rubric>
 Rules:
 - score is a weighted composite 0-1 based on rubric weights
 - In the scores array, use the prompt's 1-based index (as a string) for the prompt field — do NOT repeat the full prompt text
