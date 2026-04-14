@@ -202,4 +202,29 @@ describe('analyzer', () => {
       expect(lastCall?.system).not.toContain('## Historical Context');
     }
   });
+
+  it('buildUserMessage passes full prompt text without truncation', async () => {
+    const Anthropic = (await import('@anthropic-ai/sdk')).default as jest.MockedClass<
+      typeof import('@anthropic-ai/sdk').default
+    >;
+    const longPrompt = 'A'.repeat(500); // 500 chars — exceeds old 400-char cap
+    const longEntries: LogEntry[] = [
+      { timestamp: '2026-04-10T10:00:00Z', prompt: longPrompt },
+      { timestamp: '2026-04-10T10:01:00Z', prompt: 'Explain async' },
+      { timestamp: '2026-04-10T10:02:00Z', prompt: 'Refactor this' },
+    ];
+    await analyzeToday(longEntries, MOCK_RUBRIC, '2026-04-10');
+    // Use the most recently created instance (not index 0) to get this test's calls
+    const results = (Anthropic as unknown as jest.Mock).mock.results;
+    const mockInstance = results[results.length - 1]?.value;
+    if (mockInstance) {
+      const calls = mockInstance.messages.create.mock.calls;
+      const lastCall = calls[calls.length - 1]?.[0];
+      const userContent: string = lastCall?.messages?.[0]?.content ?? '';
+      // Full prompt text must appear in the user message
+      expect(userContent).toContain(longPrompt);
+      // Truncated form must NOT appear
+      expect(userContent).not.toContain(longPrompt.slice(0, 397) + '...');
+    }
+  });
 });

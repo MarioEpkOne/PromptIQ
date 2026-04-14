@@ -22,6 +22,7 @@ const DEFAULT_CONTROL_PATTERNS: RegExp[] = [
   /^(carry|move)\s+on\s*[.!?]*$/i,
   /^lgtm\s*[.!?]*$/i,
   /^[👍👎✅❌🙏]+$/u,
+  /^\/[\w-]+\s*[.!?]*$/i,   // Claude Code slash commands: /clear, /compact, /help, /commit, etc.
 ];
 
 export function classifierConfigPath(): string {
