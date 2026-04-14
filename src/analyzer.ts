@@ -29,10 +29,7 @@ Rules:
  */
 function buildUserMessage(entries: LogEntry[], date: string): string {
   const promptList = entries
-    .map((e, i) => {
-      const text = e.prompt.length > 400 ? e.prompt.slice(0, 397) + '...' : e.prompt;
-      return `${i + 1}. ${text}`;
-    })
+    .map((e, i) => `${i + 1}. ${e.prompt}`)
     .join('\n');
 
   return `Date: ${date}

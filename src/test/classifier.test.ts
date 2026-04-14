@@ -216,3 +216,47 @@ describe('classifyEntries', () => {
     expect(result.controlCount).toBe(1);
   });
 });
+
+describe('isControlPrompt — slash commands', () => {
+  it('/clear → true (short, also caught by length threshold)', () => {
+    expect(isControlPrompt('/clear', defaultPatterns)).toBe(true);
+  });
+
+  it('/compact → true', () => {
+    expect(isControlPrompt('/compact', defaultPatterns)).toBe(true);
+  });
+
+  it('/help → true', () => {
+    expect(isControlPrompt('/help', defaultPatterns)).toBe(true);
+  });
+
+  it('/commit → true', () => {
+    expect(isControlPrompt('/commit', defaultPatterns)).toBe(true);
+  });
+
+  it('/my-skill (hyphenated) → true', () => {
+    expect(isControlPrompt('/my-skill', defaultPatterns)).toBe(true);
+  });
+
+  it('/clear. (trailing period) → true', () => {
+    expect(isControlPrompt('/clear.', defaultPatterns)).toBe(true);
+  });
+
+  it('/clear! (trailing exclamation) → true', () => {
+    expect(isControlPrompt('/clear!', defaultPatterns)).toBe(true);
+  });
+
+  it('/clear fix the bug (task content after command) → false', () => {
+    expect(isControlPrompt('/clear fix the bug', defaultPatterns)).toBe(false);
+  });
+
+  it('Use /help for docs (slash mid-sentence) → false', () => {
+    expect(isControlPrompt('Use /help for docs', defaultPatterns)).toBe(false);
+  });
+
+  it('/ (slash then space, no command name) → false', () => {
+    // '/ ' (2 chars) is caught by length threshold; use a longer input that bypasses
+    // the threshold to verify the regex requires at least one word char after '/'
+    expect(isControlPrompt('/ not a slash command', defaultPatterns)).toBe(false);
+  });
+});
