@@ -494,6 +494,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
         analyzerError.style.display = 'block';
       }
 
+      // tested in src/test/diff.test.ts (mirrors src/diff-util.ts)
       function computeDiff(before, after) {
         var bWords = before.split(/\s+/).filter(Boolean);
         var aWords = after.split(/\s+/).filter(Boolean);
