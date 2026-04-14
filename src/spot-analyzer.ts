@@ -2,6 +2,18 @@ import Anthropic from '@anthropic-ai/sdk';
 import { loadRubric } from './rubric.js';
 import type { CriterionScore, SpotAnalysis, SpotSuggestion } from './types.js';
 
+/**
+ * Escapes XML special characters in a string so it is safe to embed in an XML element.
+ * & must be replaced first to avoid double-escaping other sequences.
+ */
+function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 const ANALYZE_SINGLE_PROMPT_TOOL: Anthropic.Tool = {
   name: 'analyze_single_prompt',
   description: 'Report a detailed quality analysis of a single prompt.',
@@ -61,8 +73,9 @@ export async function analyzePromptSpot(prompt: string): Promise<SpotAnalysis> {
 
   const systemPrompt = `You are a prompt quality expert. Analyze the following single prompt against the provided rubric criteria.
 
-RUBRIC:
-${rubric.rawText}
+<rubric criteria="${rubric.criteria.length}">
+${escapeXml(rubric.rawText)}
+</rubric>
 
 Your analysis must:
 1. Score each criterion independently on a 0–1 scale
@@ -79,7 +92,7 @@ Your analysis must:
     system: systemPrompt,
     tools: [ANALYZE_SINGLE_PROMPT_TOOL],
     tool_choice: { type: 'tool', name: 'analyze_single_prompt' },
-    messages: [{ role: 'user', content: `Prompt to analyze:\n\n"${prompt}"` }],
+    messages: [{ role: 'user', content: `Analyze the following prompt:\n\n<prompt index="1">\n${escapeXml(prompt)}\n</prompt>` }],
   });
 
   const toolUse = response.content.find(b => b.type === 'tool_use');
