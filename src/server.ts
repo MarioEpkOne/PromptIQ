@@ -2,6 +2,7 @@ import * as http from 'http';
 import { readTodayEntries, ensureDirectories } from './logger.js';
 import { getDrmSummary, getWeeklyDetail, getMonthlyDetail, getDayDetail, findLastAnalysisDate } from './drm.js';
 import type { WeeklyRecord, WeeklyRecordDaily, WeeklyRecordCompressed, MonthlyRecord } from './types.js';
+import { analyzePromptSpot } from './spot-analyzer.js';
 
 // ---------------------------------------------------------------------------
 // Inline HTML dashboard (D2, D7: embedded template literal, no file I/O)
@@ -80,6 +81,65 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     .detail-tip-text { color: #e0e0e0; font-size: 13px; margin-bottom: 6px; }
     .detail-tip-why { color: #aaa; font-size: 12px; line-height: 1.5; }
     .detail-tip-why-label { color: #666; text-transform: uppercase; font-size: 10px; letter-spacing: 0.08em; margin-right: 4px; }
+    /* Analyzer tab styles */
+    .analyzer-input-area { margin-bottom: 20px; }
+    #analyzer-input {
+      width: 100%;
+      background: #2a2a2a;
+      border: 1px solid #444;
+      color: #e0e0e0;
+      font-family: inherit;
+      font-size: 14px;
+      padding: 10px;
+      border-radius: 3px;
+      resize: vertical;
+      display: block;
+    }
+    .analyzer-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
+    #analyzer-charcount { color: #888; font-size: 12px; }
+    #analyzer-btn {
+      background: #5bc8f5;
+      color: #1a1a1a;
+      border: none;
+      padding: 6px 18px;
+      cursor: pointer;
+      border-radius: 3px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: bold;
+    }
+    #analyzer-btn:disabled { background: #333; color: #666; cursor: default; }
+    .error-banner { background: #3d1a1a; color: #f44336; border: 1px solid #f44336; border-radius: 3px; padding: 10px 14px; margin-bottom: 16px; font-size: 13px; }
+    #analyzer-spinner { color: #888; font-style: italic; margin-bottom: 16px; }
+    .result-section { margin-bottom: 24px; }
+    .result-section h3 { color: #888; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px; }
+    .criterion-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+    .criterion-name { color: #ccc; font-size: 13px; width: 140px; flex-shrink: 0; }
+    .criterion-bar { flex: 1; background: #2a2a2a; border-radius: 2px; height: 8px; overflow: hidden; }
+    .criterion-fill { height: 100%; background: #5bc8f5; border-radius: 2px; }
+    .criterion-score { color: #aaa; font-size: 12px; width: 36px; text-align: right; }
+    .overall-score { margin-top: 10px; color: #e0e0e0; font-size: 14px; }
+    .pattern-tag { background: #1e2d35; color: #5bc8f5; border-radius: 3px; padding: 2px 8px; font-size: 12px; margin-right: 6px; display: inline-block; margin-bottom: 4px; }
+    .muted { color: #555; font-size: 12px; font-style: italic; }
+    #analyzer-suggestions { padding-left: 20px; }
+    #analyzer-suggestions li { color: #ccc; font-size: 13px; margin-bottom: 8px; line-height: 1.5; }
+    .before-after-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .before-col, .after-col { background: #222; border: 1px solid #333; border-radius: 3px; padding: 12px; }
+    .col-label { color: #666; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+    #analyzer-before { color: #aaa; font-size: 13px; line-height: 1.6; }
+    #analyzer-after { color: #e0e0e0; font-size: 13px; line-height: 1.6; margin-bottom: 12px; }
+    mark.added-word { background: #1a3d1a; color: #4caf50; border-radius: 2px; padding: 0 2px; }
+    #analyzer-copy {
+      background: #2a2a2a;
+      border: 1px solid #444;
+      color: #aaa;
+      padding: 4px 12px;
+      cursor: pointer;
+      border-radius: 3px;
+      font-family: inherit;
+      font-size: 12px;
+    }
+    #analyzer-copy:hover { border-color: #5bc8f5; color: #5bc8f5; }
   </style>
 </head>
 <body>
@@ -88,6 +148,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     <button class="tab-btn active" onclick="switchTab('status')">Status</button>
     <button class="tab-btn" onclick="switchTab('patterns')">Patterns</button>
     <button class="tab-btn" onclick="switchTab('last')">Last Prompts</button>
+    <button class="tab-btn" onclick="switchTab('analyzer')">Analyzer</button>
   </div>
 
   <div id="tab-status" class="tab-content active"><p class="empty">Loading...</p></div>
@@ -96,6 +157,50 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     <div id="detail-panel" style="display:none;"></div>
   </div>
   <div id="tab-last" class="tab-content"><p class="empty">Loading...</p></div>
+  <div id="tab-analyzer" class="tab-content">
+    <div class="analyzer-input-area">
+      <textarea id="analyzer-input"
+                placeholder="Paste your prompt here..."
+                maxlength="300"
+                rows="4"></textarea>
+      <div class="analyzer-meta">
+        <span id="analyzer-charcount">0 / 300</span>
+        <button id="analyzer-btn" disabled>Analyze</button>
+      </div>
+    </div>
+
+    <div id="analyzer-error" class="error-banner" style="display:none"></div>
+    <div id="analyzer-spinner" style="display:none">Analyzing&#x2026;</div>
+    <div id="analyzer-results" style="display:none">
+      <section class="result-section">
+        <h3>Score Breakdown</h3>
+        <div id="analyzer-scores"></div>
+        <div class="overall-score">Overall: <span id="analyzer-overall"></span></div>
+      </section>
+      <section class="result-section">
+        <h3>Patterns Detected</h3>
+        <div id="analyzer-patterns"></div>
+      </section>
+      <section class="result-section">
+        <h3>Suggestions</h3>
+        <ol id="analyzer-suggestions"></ol>
+      </section>
+      <section class="result-section">
+        <h3>Improved Prompt</h3>
+        <div class="before-after-grid">
+          <div class="before-col">
+            <div class="col-label">Before</div>
+            <div id="analyzer-before"></div>
+          </div>
+          <div class="after-col">
+            <div class="col-label">After</div>
+            <div id="analyzer-after"></div>
+            <button id="analyzer-copy">Copy</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
 
   <script>
     let currentTab = 'status';
@@ -349,7 +454,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     function switchTab(tab) {
       currentTab = tab;
       document.querySelectorAll('.tab-btn').forEach((b, i) => {
-        b.classList.toggle('active', ['status','patterns','last'][i] === tab);
+        b.classList.toggle('active', ['status','patterns','last','analyzer'][i] === tab);
       });
       document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
       document.getElementById('tab-' + tab).classList.add('active');
@@ -366,6 +471,143 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     // Initial load
     loadStatus();
     statusInterval = setInterval(loadStatus, 60000);
+
+    // ─── Analyzer tab ───────────────────────────────────────────────────────
+
+    (function () {
+      var analyzerInput   = document.getElementById('analyzer-input');
+      var analyzerBtn     = document.getElementById('analyzer-btn');
+      var charCount       = document.getElementById('analyzer-charcount');
+      var analyzerError   = document.getElementById('analyzer-error');
+      var analyzerSpinner = document.getElementById('analyzer-spinner');
+      var analyzerResults = document.getElementById('analyzer-results');
+      var analyzerScores  = document.getElementById('analyzer-scores');
+      var analyzerOverall = document.getElementById('analyzer-overall');
+      var analyzerPats    = document.getElementById('analyzer-patterns');
+      var analyzerSugs    = document.getElementById('analyzer-suggestions');
+      var analyzerBefore  = document.getElementById('analyzer-before');
+      var analyzerAfter   = document.getElementById('analyzer-after');
+      var analyzerCopy    = document.getElementById('analyzer-copy');
+
+      function showError(msg) {
+        analyzerError.textContent = msg;
+        analyzerError.style.display = 'block';
+      }
+
+      // tested in src/test/diff.test.ts (mirrors src/diff-util.ts)
+      function computeDiff(before, after) {
+        var bWords = before.split(/\s+/).filter(Boolean);
+        var aWords = after.split(/\s+/).filter(Boolean);
+        var bSet = new Set(bWords);
+        return aWords.map(function (w) { return { text: w, added: !bSet.has(w) }; });
+      }
+
+      function renderResults(originalPrompt, data) {
+        // Score bars
+        analyzerScores.innerHTML = data.criterionScores.map(function (c) {
+          return '<div class="criterion-row">'
+            + '<span class="criterion-name">' + escHtml(c.criterion) + '</span>'
+            + '<div class="criterion-bar"><div class="criterion-fill" style="width:' + (c.score * 100).toFixed(1) + '%"></div></div>'
+            + '<span class="criterion-score">' + c.score.toFixed(2) + '</span>'
+            + '</div>';
+        }).join('');
+
+        analyzerOverall.textContent = data.overallScore.toFixed(2);
+
+        // Patterns
+        analyzerPats.innerHTML = (data.patterns && data.patterns.length)
+          ? data.patterns.map(function (p) { return '<span class="pattern-tag">#' + escHtml(p) + '</span>'; }).join(' ')
+          : '<span class="muted">No patterns detected</span>';
+
+        // Suggestions
+        analyzerSugs.innerHTML = (data.suggestions || []).map(function (s) {
+          return '<li><strong>' + escHtml(s.criterion) + ':</strong> ' + escHtml(s.issue) + ' \u2192 ' + escHtml(s.fix) + '</li>';
+        }).join('');
+
+        // Before
+        analyzerBefore.textContent = originalPrompt;
+
+        // After with diff highlighting
+        var diff = computeDiff(originalPrompt, data.improvedPrompt || '');
+        analyzerAfter.innerHTML = diff.map(function (d) {
+          return d.added
+            ? '<mark class="added-word">' + escHtml(d.text) + '</mark>'
+            : '<span>' + escHtml(d.text) + '</span>';
+        }).join(' ');
+
+        // Copy button
+        analyzerCopy.onclick = function () {
+          var improved = data.improvedPrompt || '';
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(improved).then(function () {
+              analyzerCopy.textContent = 'Copied!';
+              setTimeout(function () { analyzerCopy.textContent = 'Copy'; }, 1500);
+            }).catch(function () { fallbackCopy(improved); });
+          } else {
+            fallbackCopy(improved);
+          }
+        };
+
+        analyzerResults.style.display = 'block';
+      }
+
+      function fallbackCopy(text) {
+        // Graceful degrade when clipboard API unavailable (non-HTTPS, old browser)
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        try {
+          document.execCommand('copy');
+          analyzerCopy.textContent = 'Copied!';
+          setTimeout(function () { analyzerCopy.textContent = 'Copy'; }, 1500);
+        } catch (e) {
+          analyzerCopy.textContent = 'Select to copy';
+        }
+        document.body.removeChild(ta);
+      }
+
+      analyzerInput.addEventListener('input', function () {
+        var len = analyzerInput.value.length;
+        charCount.textContent = len + ' / 300';
+        charCount.style.color = len > 280 ? '#e74c3c' : '#888';
+        // Button enabled when length > 0 and not only whitespace
+        analyzerBtn.disabled = analyzerInput.value.trim().length === 0;
+      });
+
+      analyzerBtn.addEventListener('click', async function () {
+        var prompt = analyzerInput.value.trim();
+        if (!prompt) return;
+
+        analyzerError.style.display = 'none';
+        analyzerResults.style.display = 'none';
+        analyzerSpinner.style.display = 'block';
+        analyzerBtn.disabled = true;
+
+        try {
+          var res = await fetch('/api/analyze-prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: prompt })
+          });
+          var data = await res.json();
+
+          if (!res.ok) {
+            showError(data.error || 'Analysis failed');
+            return;
+          }
+          renderResults(prompt, data);
+        } catch (err) {
+          showError('Network error \u2014 is the server running?');
+        } finally {
+          analyzerSpinner.style.display = 'none';
+          analyzerBtn.disabled = analyzerInput.value.trim().length === 0;
+        }
+      });
+    })();
   </script>
 </body>
 </html>`;
@@ -487,6 +729,37 @@ export function startServer(port: number): http.Server {
   const server = http.createServer((req, res) => {
     const url = req.url ?? '/';
     const method = req.method ?? 'GET';
+
+    // POST /api/analyze-prompt — single-prompt spot analysis
+    if (method === 'POST' && url === '/api/analyze-prompt') {
+      let body = '';
+      req.on('data', chunk => (body += chunk));
+      req.on('end', async () => {
+        try {
+          const parsed = JSON.parse(body) as { prompt?: unknown };
+          const prompt = parsed.prompt;
+
+          if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
+            sendJson(res, 400, { error: 'prompt is required' });
+            return;
+          }
+          if (prompt.length > 300) {
+            sendJson(res, 400, { error: 'Prompt must be 300 characters or fewer' });
+            return;
+          }
+          if (!process.env.ANTHROPIC_API_KEY) {
+            sendJson(res, 503, { error: "ANTHROPIC_API_KEY is not set — run `export ANTHROPIC_API_KEY=...` and restart the server" });
+            return;
+          }
+
+          const result = await analyzePromptSpot(prompt);
+          sendJson(res, 200, result);
+        } catch (err) {
+          sendJson(res, 500, { error: String(err) });
+        }
+      });
+      return;
+    }
 
     if (method !== 'GET') {
       return sendJson(res, 405, { error: 'Method not allowed' });
