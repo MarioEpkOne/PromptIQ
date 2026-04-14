@@ -66,6 +66,7 @@ export interface WeekDayRecord {
   summary: string;
   suggestions?: Suggestion[];   // from DayAnalysis.suggestions
   mainTip?: MainTip;            // optional — absent in records written before this feature
+  actedOnTip?: boolean;         // user marked they acted on the tip for this day
   // Error fields (only present when analysis failed)
   error?: boolean;
   errorType?: string;

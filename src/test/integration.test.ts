@@ -2,6 +2,22 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
+// Mock chalk (ESM-only — Jest runs CJS, so chalk must be mocked)
+jest.mock('chalk', () => {
+  const identity = (s: string) => s;
+  const tagged = Object.assign(identity, {
+    bold: Object.assign(identity, { cyan: identity }),
+    cyan: Object.assign(identity, { bold: identity }),
+    dim: identity,
+    yellow: identity,
+    green: identity,
+    red: identity,
+    gray: identity,
+    italic: identity,
+  });
+  return { __esModule: true, default: tagged };
+});
+
 // Mock Anthropic to avoid real API calls in integration tests
 jest.mock('@anthropic-ai/sdk', () => ({
   __esModule: true,
@@ -170,5 +186,111 @@ describe('integration: analyze flow', () => {
     expect(fs.existsSync(monthlyDir)).toBe(true);
     const monthlyFiles = fs.readdirSync(monthlyDir).filter(f => f.endsWith('.json'));
     expect(monthlyFiles.length).toBeGreaterThan(0);
+  });
+
+  it('feedback command: sets actedOnTip in weekly file and prints mainTip confirmation', async () => {
+    const { ensureDirectories } = await import('../logger.js');
+    const { upsertDayInWeekly } = await import('../drm.js');
+    ensureDirectories();
+
+    // Seed a weekly record with a known day
+    await upsertDayInWeekly({
+      date: '2026-04-10',
+      promptCount: 5,
+      avgScore: 0.65,
+      scores: [],
+      patterns: [],
+      suggestions: [],
+      summary: 'A day.',
+      mainTip: { text: 'Write clearer goals.', why: 'Clarity saves iterations.' },
+    });
+
+    // Simulate the feedback command logic
+    const { setActedOnTip } = await import('../drm.js');
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.map(String).join(' '));
+
+    const { mainTip } = setActedOnTip('2026-04-10');
+    if (mainTip?.text) {
+      console.log(`Recorded: acted on "${mainTip.text}" for 2026-04-10.`);
+    } else {
+      console.log(`Recorded: acted on tip for 2026-04-10.`);
+    }
+    console.log = origLog;
+
+    expect(logs.join('\n')).toContain('Write clearer goals.');
+    expect(logs.join('\n')).toContain('Recorded: acted on');
+
+    // Verify the file was actually updated
+    const { getDayDetail } = await import('../drm.js');
+    const day = getDayDetail('2026-04-10');
+    expect(day?.actedOnTip).toBe(true);
+  });
+
+  it('status command: shows Tip follow-through when >= 2 acted pairs exist', async () => {
+    const { ensureDirectories } = await import('../logger.js');
+    const { computeFeedbackCorrelation } = await import('../drm.js');
+    const { renderStatus } = await import('../renderer.js');
+    ensureDirectories();
+
+    // Build weekly files with 2 acted+followed-up pairs in memory
+    const weeklyFiles = [
+      {
+        week: '2026-W15',
+        startDate: '2026-04-07',
+        endDate: '2026-04-13',
+        detail: 'daily' as const,
+        days: {
+          '2026-04-10': { promptCount: 5, avgScore: 0.6, topPatterns: [], summary: 'A.', actedOnTip: true as const },
+          '2026-04-11': { promptCount: 5, avgScore: 0.75, topPatterns: [], summary: 'B.' },
+          '2026-04-12': { promptCount: 5, avgScore: 0.5, topPatterns: [], summary: 'C.', actedOnTip: true as const },
+          '2026-04-13': { promptCount: 5, avgScore: 0.8, topPatterns: [], summary: 'D.' },
+        },
+      },
+    ];
+
+    const feedbackCorrelation = computeFeedbackCorrelation(weeklyFiles);
+    expect(feedbackCorrelation).not.toBeNull();
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.map(String).join(' '));
+    renderStatus(0, null, weeklyFiles, [], feedbackCorrelation);
+    console.log = origLog;
+
+    expect(logs.join('\n')).toContain('Tip follow-through');
+  });
+
+  it('status command: no Tip follow-through line when < 2 pairs', async () => {
+    const { ensureDirectories } = await import('../logger.js');
+    const { computeFeedbackCorrelation } = await import('../drm.js');
+    const { renderStatus } = await import('../renderer.js');
+    ensureDirectories();
+
+    const weeklyFiles = [
+      {
+        week: '2026-W15',
+        startDate: '2026-04-07',
+        endDate: '2026-04-13',
+        detail: 'daily' as const,
+        days: {
+          '2026-04-10': { promptCount: 5, avgScore: 0.6, topPatterns: [], summary: 'A.', actedOnTip: true as const },
+          '2026-04-11': { promptCount: 5, avgScore: 0.75, topPatterns: [], summary: 'B.' },
+          // Only 1 pair
+        },
+      },
+    ];
+
+    const feedbackCorrelation = computeFeedbackCorrelation(weeklyFiles);
+    expect(feedbackCorrelation).toBeNull();
+
+    const logs: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => logs.push(args.map(String).join(' '));
+    renderStatus(0, null, weeklyFiles, [], feedbackCorrelation);
+    console.log = origLog;
+
+    expect(logs.join('\n')).not.toContain('Tip follow-through');
   });
 });

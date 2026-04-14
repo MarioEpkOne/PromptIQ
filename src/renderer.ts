@@ -132,6 +132,7 @@ export function renderStatus(
   lastAnalysisDate: string | null,
   weeklyFiles: WeeklyRecord[],
   monthlyFiles: MonthlyRecord[],
+  feedbackCorrelation?: { count: number; avgDelta: number } | null,
 ): void {
   // Collect all days with error === true from daily-detail weekly files
   const failedDates: string[] = [];
@@ -156,6 +157,14 @@ export function renderStatus(
   if (failedDates.length > 0) {
     console.log(
       `  ${chalk.yellow('⚠')} ${chalk.yellow(`${failedDates.length} day${failedDates.length === 1 ? '' : 's'} failed to analyze`)}: ${failedDates.join(', ')}`,
+    );
+  }
+  if (feedbackCorrelation) {
+    const deltaStr = feedbackCorrelation.avgDelta >= 0
+      ? chalk.green(`+${(feedbackCorrelation.avgDelta * 100).toFixed(1)} pts`)
+      : chalk.red(`${(feedbackCorrelation.avgDelta * 100).toFixed(1)} pts`);
+    console.log(
+      `  Tip follow-through:      ${chalk.bold(String(feedbackCorrelation.count))} acted → avg next-day Δ ${deltaStr}`,
     );
   }
   console.log('');

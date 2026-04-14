@@ -1,6 +1,6 @@
 import * as http from 'http';
 import { readTodayEntries, ensureDirectories } from './logger.js';
-import { getDrmSummary, getWeeklyDetail, getMonthlyDetail, getDayDetail, findLastAnalysisDate } from './drm.js';
+import { getDrmSummary, getWeeklyDetail, getMonthlyDetail, getDayDetail, findLastAnalysisDate, computeFeedbackCorrelation } from './drm.js';
 import type { WeeklyRecord, WeeklyRecordDaily, WeeklyRecordCompressed, MonthlyRecord } from './types.js';
 import { analyzePromptSpot } from './spot-analyzer.js';
 
@@ -47,6 +47,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     .badge-green { background: #1a3d1a; color: #4caf50; }
     .badge-yellow { background: #3d3000; color: #ffc107; }
     .badge-red { background: #3d1a1a; color: #f44336; }
+    .badge-acted { background: #1a3d1a; color: #4caf50; }
     .warn { color: #ffc107; }
     .empty { color: #666; font-style: italic; margin-top: 12px; }
     .stat-row { margin-bottom: 10px; }
@@ -227,6 +228,15 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           if (data.failedDates && data.failedDates.length > 0) {
             html += '<div class="stat-row warn">&#9888; ' + data.failedDates.length + ' day(s) failed to analyze: ' + data.failedDates.join(', ') + '</div>';
           }
+          if (data.feedbackCorrelation) {
+            var fc = data.feedbackCorrelation;
+            var delta = (fc.avgDelta * 100).toFixed(1);
+            var sign = fc.avgDelta >= 0 ? '+' : '';
+            var color = fc.avgDelta >= 0 ? '#4caf50' : '#f44336';
+            html += '<div class="stat-row"><span class="stat-label">Tip follow-through:</span>'
+              + '<span class="stat-value">' + fc.count + ' acted &rarr; avg next-day &Delta; '
+              + '<span style="color:' + color + '">' + sign + delta + ' pts</span></span></div>';
+          }
         }
         el.innerHTML = html || '<p class="empty">No data yet \u2014 run <code>promptiq analyze</code> to get started.</p>';
       } catch (e) {
@@ -390,6 +400,12 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
           html += '<span>' + scoreBadge(data.avgScore || 0) + '</span>';
           html += ' <span style="color:#666;font-size:11px;">' + data.promptCount + ' prompts</span>';
           html += '</div>';
+
+          if (data.actedOnTip) {
+            html += '<div class="detail-section">'
+              + '<span class="badge badge-acted">&#x2714; Acted on tip</span>'
+              + '</div>';
+          }
 
           if (data.mainTip && data.mainTip.text && data.mainTip.why) {
             html += '<div class="detail-section detail-main-tip">';
@@ -633,12 +649,14 @@ function buildStatusResponse(): object {
   }
   failedDates.sort();
 
+  const feedbackCorrelation = computeFeedbackCorrelation(weeklyFiles);
   return {
     todayCount: entries.length,
     lastAnalysisDate,
     weeklyCount: weeklyFiles.length,
     monthlyCount: monthlyFiles.length,
     failedDates,
+    feedbackCorrelation,
   };
 }
 

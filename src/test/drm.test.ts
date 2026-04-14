@@ -569,4 +569,220 @@ describe('drm', () => {
     const record = getDayDetail('2026-04-10');
     expect(record).toBeNull();
   });
+
+  it('setActedOnTip sets actedOnTip true and returns mainTip', async () => {
+    const { ensureDirectories } = await import('../logger.js');
+    const { upsertDayInWeekly, setActedOnTip, getDayDetail } = await import('../drm.js');
+    ensureDirectories();
+
+    await upsertDayInWeekly({
+      date: '2026-04-10',
+      promptCount: 5,
+      avgScore: 0.7,
+      scores: [],
+      patterns: [],
+      suggestions: [],
+      summary: 'Test.',
+      mainTip: { text: 'Be specific.', why: 'Clarity matters.' },
+    });
+
+    const result = setActedOnTip('2026-04-10');
+    expect(result.mainTip).toEqual({ text: 'Be specific.', why: 'Clarity matters.' });
+
+    const day = getDayDetail('2026-04-10');
+    expect(day?.actedOnTip).toBe(true);
+  });
+
+  it('setActedOnTip is idempotent: second call returns same mainTip without extra write', async () => {
+    const { ensureDirectories } = await import('../logger.js');
+    const { upsertDayInWeekly, setActedOnTip } = await import('../drm.js');
+    ensureDirectories();
+
+    await upsertDayInWeekly({
+      date: '2026-04-10',
+      promptCount: 5,
+      avgScore: 0.7,
+      scores: [],
+      patterns: [],
+      suggestions: [],
+      summary: 'Test.',
+      mainTip: { text: 'Be specific.', why: 'Clarity matters.' },
+    });
+
+    const r1 = setActedOnTip('2026-04-10');
+    const r2 = setActedOnTip('2026-04-10');
+    expect(r1.mainTip).toEqual(r2.mainTip);
+    // Verify still true after both calls
+    const { getDayDetail } = await import('../drm.js');
+    const day = getDayDetail('2026-04-10');
+    expect(day?.actedOnTip).toBe(true);
+  });
+
+  it('setActedOnTip throws "No analysis found" when no weekly file exists', async () => {
+    const { ensureDirectories } = await import('../logger.js');
+    const { setActedOnTip } = await import('../drm.js');
+    ensureDirectories();
+
+    expect(() => setActedOnTip('2026-04-10')).toThrow('No analysis found for 2026-04-10');
+  });
+
+  it('setActedOnTip throws "compressed" error for compressed weekly', async () => {
+    const { ensureDirectories } = await import('../logger.js');
+    const { setActedOnTip } = await import('../drm.js');
+    ensureDirectories();
+
+    const weeklyDir = path.join(tempDir, '.promptiq', 'weekly');
+    fs.mkdirSync(weeklyDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(weeklyDir, '2026-W15.json'),
+      JSON.stringify({
+        week: '2026-W15',
+        startDate: '2026-04-06',
+        endDate: '2026-04-12',
+        detail: 'compressed',
+        promptCount: 20,
+        avgScore: 0.7,
+        topPatterns: [],
+        summary: 'Old.',
+      }),
+    );
+
+    expect(() => setActedOnTip('2026-04-10')).toThrow('compressed');
+  });
+
+  it('setActedOnTip throws "No analysis found" when date not in days map', async () => {
+    const { ensureDirectories } = await import('../logger.js');
+    const { setActedOnTip } = await import('../drm.js');
+    ensureDirectories();
+
+    const weeklyDir = path.join(tempDir, '.promptiq', 'weekly');
+    fs.mkdirSync(weeklyDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(weeklyDir, '2026-W15.json'),
+      JSON.stringify({
+        week: '2026-W15',
+        startDate: '2026-04-06',
+        endDate: '2026-04-12',
+        detail: 'daily',
+        days: {
+          '2026-04-08': { promptCount: 5, avgScore: 0.7, topPatterns: [], summary: 'A day.' },
+        },
+      }),
+    );
+
+    // 2026-04-10 is in W15 but not in the days map
+    expect(() => setActedOnTip('2026-04-10')).toThrow('No analysis found for 2026-04-10');
+  });
+
+  it('computeFeedbackCorrelation returns null when no actedOnTip entries', async () => {
+    const { computeFeedbackCorrelation } = await import('../drm.js');
+    const weeklyFiles = [
+      {
+        week: '2026-W15',
+        startDate: '2026-04-07',
+        endDate: '2026-04-13',
+        detail: 'daily' as const,
+        days: {
+          '2026-04-10': { promptCount: 5, avgScore: 0.7, topPatterns: [], summary: 'A.' },
+          '2026-04-11': { promptCount: 5, avgScore: 0.75, topPatterns: [], summary: 'B.' },
+        },
+      },
+    ];
+    expect(computeFeedbackCorrelation(weeklyFiles)).toBeNull();
+  });
+
+  it('computeFeedbackCorrelation returns null when only 1 acted+followed-up pair', async () => {
+    const { computeFeedbackCorrelation } = await import('../drm.js');
+    const weeklyFiles = [
+      {
+        week: '2026-W15',
+        startDate: '2026-04-07',
+        endDate: '2026-04-13',
+        detail: 'daily' as const,
+        days: {
+          '2026-04-10': { promptCount: 5, avgScore: 0.6, topPatterns: [], summary: 'A.', actedOnTip: true },
+          '2026-04-11': { promptCount: 5, avgScore: 0.75, topPatterns: [], summary: 'B.' },
+          // Only 1 pair — need 2
+        },
+      },
+    ];
+    expect(computeFeedbackCorrelation(weeklyFiles)).toBeNull();
+  });
+
+  it('computeFeedbackCorrelation returns count and avgDelta for 2 pairs', async () => {
+    const { computeFeedbackCorrelation } = await import('../drm.js');
+    // Day 10 acted: score 0.6, next day 11: 0.75 → delta +0.15
+    // Day 12 acted: score 0.5, next day 13: 0.8  → delta +0.30
+    // avgDelta = (0.15 + 0.30) / 2 = 0.225
+    const weeklyFiles = [
+      {
+        week: '2026-W15',
+        startDate: '2026-04-07',
+        endDate: '2026-04-13',
+        detail: 'daily' as const,
+        days: {
+          '2026-04-10': { promptCount: 5, avgScore: 0.6, topPatterns: [], summary: 'A.', actedOnTip: true },
+          '2026-04-11': { promptCount: 5, avgScore: 0.75, topPatterns: [], summary: 'B.' },
+          '2026-04-12': { promptCount: 5, avgScore: 0.5, topPatterns: [], summary: 'C.', actedOnTip: true },
+          '2026-04-13': { promptCount: 5, avgScore: 0.8, topPatterns: [], summary: 'D.' },
+        },
+      },
+    ];
+    const result = computeFeedbackCorrelation(weeklyFiles);
+    expect(result).not.toBeNull();
+    expect(result!.count).toBe(2);
+    expect(result!.avgDelta).toBeCloseTo(0.225, 5);
+  });
+
+  it('computeFeedbackCorrelation resolves cross-week lookup correctly', async () => {
+    const { computeFeedbackCorrelation } = await import('../drm.js');
+    // 2026-04-12 (Sunday, W15) acted; next analyzed day 2026-04-13 (Monday, W16)
+    const weeklyFiles: import('../types.js').WeeklyRecord[] = [
+      {
+        week: '2026-W15',
+        startDate: '2026-04-07',
+        endDate: '2026-04-13',
+        detail: 'daily' as const,
+        days: {
+          '2026-04-11': { promptCount: 5, avgScore: 0.6, topPatterns: [], summary: 'A.', actedOnTip: true },
+          '2026-04-12': { promptCount: 5, avgScore: 0.5, topPatterns: [], summary: 'B.', actedOnTip: true },
+        },
+      },
+      {
+        week: '2026-W16',
+        startDate: '2026-04-14',
+        endDate: '2026-04-20',
+        detail: 'daily' as const,
+        days: {
+          '2026-04-13': { promptCount: 5, avgScore: 0.8, topPatterns: [], summary: 'C.' },
+          '2026-04-14': { promptCount: 5, avgScore: 0.7, topPatterns: [], summary: 'D.' },
+        },
+      },
+    ];
+    const result = computeFeedbackCorrelation(weeklyFiles);
+    expect(result).not.toBeNull();
+    expect(result!.count).toBe(2);
+    // 2026-04-11 acted (0.6) → next: 2026-04-12 (0.5) → delta -0.1
+    // 2026-04-12 acted (0.5) → next: 2026-04-13 (0.8) → delta +0.3
+    // avg = (-0.1 + 0.3) / 2 = 0.1
+    expect(result!.avgDelta).toBeCloseTo(0.1, 5);
+  });
+
+  it('computeFeedbackCorrelation skips acted day with no next-day within 7 days', async () => {
+    const { computeFeedbackCorrelation } = await import('../drm.js');
+    // Day 10 acted, no subsequent analyzed day within 7 days → data point skipped
+    const weeklyFiles = [
+      {
+        week: '2026-W15',
+        startDate: '2026-04-07',
+        endDate: '2026-04-13',
+        detail: 'daily' as const,
+        days: {
+          '2026-04-10': { promptCount: 5, avgScore: 0.6, topPatterns: [], summary: 'A.', actedOnTip: true },
+          // No next-day within 7 days of 2026-04-10 in any file
+        },
+      },
+    ];
+    expect(computeFeedbackCorrelation(weeklyFiles)).toBeNull();
+  });
 });

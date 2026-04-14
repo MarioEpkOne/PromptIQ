@@ -6,7 +6,7 @@ import { runLog, readTodayEntries, readEntriesForDate, listDailyDates, ensureDir
 import { loadRubric, copyDefaultRubric, rubricPath } from './rubric.js';
 import { analyzeToday } from './analyzer.js';
 import { classifyEntries, loadClassifierConfig } from './classifier.js';
-import { runRollup, upsertDayInWeekly, upsertErrorInWeekly, getDrmSummary, isoWeekLabel, findLastAnalysisDate } from './drm.js';
+import { runRollup, upsertDayInWeekly, upsertErrorInWeekly, getDrmSummary, isoWeekLabel, findLastAnalysisDate, setActedOnTip, computeFeedbackCorrelation } from './drm.js';
 import {
   renderAnalysis,
   renderStatus,
@@ -154,7 +154,8 @@ program
     const { weeklyFiles, monthlyFiles } = getDrmSummary();
     const lastAnalysisDate = findLastAnalysisDate(weeklyFiles);
 
-    renderStatus(todayCount, lastAnalysisDate, weeklyFiles, monthlyFiles);
+    const feedbackCorrelation = computeFeedbackCorrelation(weeklyFiles);
+    renderStatus(todayCount, lastAnalysisDate, weeklyFiles, monthlyFiles, feedbackCorrelation);
   });
 
 // ---------------------------------------------------------------------------
@@ -330,6 +331,45 @@ program
     if (skipped > 0) parts.push(`${skipped} skipped (too few prompts)`);
     if (failed > 0) parts.push(`${failed} failed`);
     console.log(`Catch-up complete: ${parts.join(', ')}.`);
+  });
+
+// ---------------------------------------------------------------------------
+// feedback
+// ---------------------------------------------------------------------------
+program
+  .command('feedback')
+  .description("Record that you acted on a day's tip (closes the coaching loop)")
+  .option('--acted', 'Mark that you acted on the mainTip for the target day')
+  .option('--date <YYYY-MM-DD>', 'Target date (default: yesterday)')
+  .action((options: { acted?: boolean; date?: string }) => {
+    if (!options.acted) {
+      console.error('Usage: promptiq feedback --acted [--date YYYY-MM-DD]');
+      process.exit(1);
+    }
+
+    const date = options.date ?? (() => {
+      const d = new Date();
+      d.setUTCDate(d.getUTCDate() - 1);
+      return d.toISOString().split('T')[0];
+    })();
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      console.error(`Invalid date format: ${date}. Use YYYY-MM-DD.`);
+      process.exit(1);
+    }
+
+    ensureDirectories();
+    try {
+      const { mainTip } = setActedOnTip(date);
+      if (mainTip?.text) {
+        console.log(`Recorded: acted on "${mainTip.text}" for ${date}.`);
+      } else {
+        console.log(`Recorded: acted on tip for ${date}.`);
+      }
+    } catch (err) {
+      console.error(String(err));
+      process.exit(1);
+    }
   });
 
 // ---------------------------------------------------------------------------

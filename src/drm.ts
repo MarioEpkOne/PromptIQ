@@ -4,6 +4,7 @@ import { promptiqDir, readEntriesForDate, deleteDailyFile, listDailyDates } from
 import { synthesizeWeek } from './analyzer.js';
 import type {
   DayAnalysis,
+  MainTip,
   WeeklyRecord,
   WeeklyRecordDaily,
   WeeklyRecordCompressed,
@@ -561,6 +562,84 @@ export function findLastAnalysisDate(weeklyFiles: WeeklyRecord[]): string | null
   }
 
   return lastDate;
+}
+
+/**
+ * Marks the given date's day record as acted-on by the user.
+ * Reads the weekly file, sets actedOnTip: true, writes back.
+ * Idempotent: if already true, skips the write and returns normally.
+ *
+ * Throws for:
+ * - No weekly file for the date's week.
+ * - Weekly is compressed (per-day detail gone).
+ * - Date is not present in the days map.
+ */
+export function setActedOnTip(date: string): { mainTip?: MainTip } {
+  const week = isoWeekLabel(date);
+  const record = readWeekly(week);
+
+  if (!record) {
+    throw new Error(`No analysis found for ${date}. Run 'promptiq analyze' (or 'promptiq catchup') first.`);
+  }
+  if (record.detail === 'compressed') {
+    throw new Error(`That day's data has been compressed — feedback can only be recorded for days within the last ~7 days.`);
+  }
+
+  const daily = record as WeeklyRecordDaily;
+  if (!(date in daily.days)) {
+    throw new Error(`No analysis found for ${date}. Run 'promptiq analyze' (or 'promptiq catchup') first.`);
+  }
+
+  const dayRecord = daily.days[date];
+  const mainTip = dayRecord.mainTip;
+
+  if (dayRecord.actedOnTip === true) {
+    return { mainTip }; // idempotent — no write
+  }
+
+  daily.days[date] = { ...dayRecord, actedOnTip: true };
+  writeWeekly(daily);
+  return { mainTip };
+}
+
+/**
+ * Computes correlation between acted-on tips and next-day score improvement.
+ * Requires at least 2 (actedDay, nextAnalyzedDay) pairs to return a result.
+ * Returns null if insufficient data.
+ */
+export function computeFeedbackCorrelation(
+  weeklyFiles: WeeklyRecord[],
+): { count: number; avgDelta: number } | null {
+  // Build a flat map: date → avgScore for all non-error daily-detail days
+  const scoreByDate: Record<string, number> = {};
+  for (const w of weeklyFiles) {
+    if (w.detail !== 'daily') continue;
+    for (const [date, d] of Object.entries((w as WeeklyRecordDaily).days)) {
+      if (!d.error) scoreByDate[date] = d.avgScore;
+    }
+  }
+
+  const deltas: number[] = [];
+  for (const w of weeklyFiles) {
+    if (w.detail !== 'daily') continue;
+    for (const [date, d] of Object.entries((w as WeeklyRecordDaily).days)) {
+      if (!d.actedOnTip || d.error) continue;
+      // Find next analyzed day within 7 calendar days
+      for (let offset = 1; offset <= 7; offset++) {
+        const next = new Date(date + 'T12:00:00Z');
+        next.setUTCDate(next.getUTCDate() + offset);
+        const nextDate = next.toISOString().split('T')[0];
+        if (nextDate in scoreByDate) {
+          deltas.push(scoreByDate[nextDate] - d.avgScore);
+          break;
+        }
+      }
+    }
+  }
+
+  if (deltas.length < 2) return null;
+  const avg = deltas.reduce((s, d) => s + d, 0) / deltas.length;
+  return { count: deltas.length, avgDelta: avg };
 }
 
 export function getDrmSummary(): {
