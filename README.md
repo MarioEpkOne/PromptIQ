@@ -426,7 +426,7 @@ This separation keeps individual calls fast (< 2s each), cheap (small context), 
 
 > *The agent can be invoked from multiple surfaces without re-architecting.*
 
-PromptIQ supports four trigger surfaces:
+PromptIQ supports six trigger surfaces:
 
 | Surface | How | Use case |
 |---|---|---|
