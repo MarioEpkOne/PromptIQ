@@ -74,17 +74,17 @@ describe('POST /api/analyze-prompt', () => {
     expect(r.status).toBe(400);
   });
 
-  it('400 when prompt is 301 characters', async () => {
-    const long = 'a'.repeat(301);
+  it('400 when prompt is 501 characters', async () => {
+    const long = 'a'.repeat(501);
     const r = await makeRequest(server, 'POST', '/api/analyze-prompt', JSON.stringify({ prompt: long }));
     expect(r.status).toBe(400);
     const body = JSON.parse(r.body);
-    expect(body.error).toMatch(/300/);
+    expect(body.error).toMatch(/500/);
   });
 
-  it('200 when prompt is exactly 300 characters', async () => {
-    const exactly300 = 'a'.repeat(300);
-    const r = await makeRequest(server, 'POST', '/api/analyze-prompt', JSON.stringify({ prompt: exactly300 }));
+  it('200 when prompt is exactly 500 characters', async () => {
+    const exactly500 = 'a'.repeat(500);
+    const r = await makeRequest(server, 'POST', '/api/analyze-prompt', JSON.stringify({ prompt: exactly500 }));
     expect(r.status).toBe(200);
   });
 

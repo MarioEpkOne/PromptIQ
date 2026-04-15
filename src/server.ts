@@ -183,10 +183,10 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     <div class="analyzer-input-area">
       <textarea id="analyzer-input"
                 placeholder="Paste your prompt here..."
-                maxlength="300"
+                maxlength="500"
                 rows="4"></textarea>
       <div class="analyzer-meta">
-        <span id="analyzer-charcount">0 / 300</span>
+        <span id="analyzer-charcount">0 / 500</span>
         <button id="analyzer-btn" disabled>Analyze</button>
       </div>
     </div>
@@ -635,8 +635,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
       analyzerInput.addEventListener('input', function () {
         var len = analyzerInput.value.length;
-        charCount.textContent = len + ' / 300';
-        charCount.style.color = len > 280 ? '#e74c3c' : '#888';
+        charCount.textContent = len + ' / 500';
+        charCount.style.color = len > 480 ? '#e74c3c' : '#888';
         // Button enabled when length > 0 and not only whitespace
         analyzerBtn.disabled = analyzerInput.value.trim().length === 0;
       });
@@ -879,8 +879,8 @@ export function startServer(port: number): http.Server {
             sendJson(res, 400, { error: 'prompt is required' });
             return;
           }
-          if (prompt.length > 300) {
-            sendJson(res, 400, { error: 'Prompt must be 300 characters or fewer' });
+          if (prompt.length > 500) {
+            sendJson(res, 400, { error: 'Prompt must be 500 characters or fewer' });
             return;
           }
           if (!process.env.ANTHROPIC_API_KEY) {
