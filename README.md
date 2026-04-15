@@ -502,23 +502,37 @@ All data is local to `~/.promptiq/`. No cloud sync, no telemetry, no external da
 
 ---
 
+## Running in the Background (WSL / Linux)
+
+Port 80 requires elevated privileges. The recommended setup uses a helper script that starts the server as a background process, guards against duplicate instances, and always uses the correct port and API key.
+
+```bash
+piq start   # start the dashboard in the background
+piq stop    # stop it
+piq         # show available commands
+```
+
+Set this up by adding a `piq` shell function to your `~/.bashrc` and a startup script that sources your API key file and runs `sudo node dist/cli.js serve` in the background. See the script at `~/promptiq.sh` if you have the WSL setup.
+
+---
+
 ## Development
 
 ```bash
 # Install dependencies
-npm install
+pnpm install
 
 # Build (outputs to dist/)
-npm run build
+pnpm run build
 
 # Watch mode
-npm run dev
+pnpm run dev
 
 # Type check
-npm run lint
+pnpm run lint
 
 # Tests
-npm test
+pnpm test
 
 # Install locally for testing
 npm install -g .
