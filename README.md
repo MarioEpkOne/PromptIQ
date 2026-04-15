@@ -62,8 +62,8 @@ Register the Claude Code hook in `~/.claude/settings.json` to start logging auto
 | `promptiq patterns` | Weekly and monthly pattern trends in the terminal |
 | `promptiq last [n]` | Show the last *n* logged prompts (default: 10) |
 | `promptiq rubric` | Open your rubric in `$EDITOR` |
-| `promptiq serve [--port N]` | Start the local web dashboard (default: port 4242) |
-| `promptiq schedule [--time HH:MM]` | Install daily cron job + optional startup catch-up |
+| `promptiq serve [--port N]` | Start the local web dashboard (default: port 80) |
+| `promptiq schedule [--time HH:MM] [--on-startup] [--remove]` | Install daily cron job; `--on-startup` adds a reboot catch-up+serve job; `--remove` removes all scheduled jobs |
 | `promptiq log` | Append the current prompt to today's JSONL (called by the hook) |
 | `promptiq feedback [--acted] [--date YYYY-MM-DD]` | Record whether you acted on the last analysis tip |
 | `promptiq mcp [--setup]` | Start the MCP stdio server; `--setup` prints the Claude Code config snippet |
@@ -93,12 +93,13 @@ The tool call extracts:
 
 | Field | Type | Description |
 |---|---|---|
-| `scores` | `Record<index, number>` | 0–1 composite score per prompt |
-| `avgScore` | `number` | Weighted mean across all prompts |
+| `scores` | `Array<{ prompt, score, weakestCriterion }>` | One entry per prompt: 1-based index string, 0–1 score, and the weakest rubric criterion |
 | `patterns` | `Pattern[]` | Recurring issues with frequency counts |
 | `suggestions` | `Suggestion[]` | Up to 3 improvements with before/after examples |
 | `mainTip` | `{ text, why }` | Single highest-leverage improvement |
 | `summary` | `string` | Prose digest stored in DRM for long-term recall |
+
+`avgScore` is not returned by Claude — it is computed in application code by averaging the per-prompt scores from the `scores` array.
 
 Results are written atomically to the weekly DRM file before any cleanup runs.
 
@@ -214,7 +215,7 @@ promptiq rubric   # opens in $EDITOR
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Yes | Anthropic API key for analysis calls |
 | `PROMPTIQ_HOME` | No | Override `~/.promptiq` data directory (used in tests) |
-| `PROMPTIQ_PORT` | No | Default port for `serve` (default: 4242) |
+| `PROMPTIQ_PORT` | No | Override port for `serve` (default: 80) |
 
 ---
 
@@ -396,7 +397,7 @@ The rollup logic (`drm.ts`) is pure TypeScript: date arithmetic, file I/O, objec
 
 **Hook errors are swallowed.** `promptiq log` always exits 0. A logging failure must never interrupt a Claude Code session.
 
-**Analysis errors are localized.** If the weekly synthesis fails (network error, API timeout), `analyzeToday()` falls back to concatenating per-day summaries. The user gets a slightly less polished weekly view, not a crash.
+**Analysis errors are localized.** If the weekly synthesis fails (network error, API timeout), `synthesizeWeek()` falls back to concatenating per-day summaries. The user gets a slightly less polished weekly view, not a crash. `analyzeToday()` itself throws on failure — the daily JSONL is preserved so the user can retry.
 
 **CLI errors print one line.** No stack traces to stdout in production mode. Errors surface as `promptiq: <message>` and exit 1.
 
