@@ -104,6 +104,8 @@ The hook never throws. If the data directory doesn't exist it's created silently
 
 `promptiq analyze` loads today's JSONL, strips control prompts (see [Prompt Classification](#prompt-classification)), and calls the Claude API **once** with all remaining prompts in a single batch. Claude is given your rubric as the system prompt and returns a structured `report_analysis` tool call — never free-form text.
 
+The rubric and each prompt are injected using structured XML tags (`<rubric criteria="N">` and `<prompt index="1">`) with all content XML-escaped via `escapeXml()`. This prevents prompt injection from user-authored rubric files or multi-line prompts containing special characters.
+
 The tool call extracts:
 
 | Field | Type | Description |
@@ -162,8 +164,9 @@ The minimum length threshold (default: 11 characters) provides a final safety ne
 
 **Tabs:**
 
-- **Status** — today's prompt count, last analysis date, failed days, DRM tier stats
-- **Patterns** — clickable day/week/month cards with full analysis detail panels
+- **Status** — today's prompt count, prompts captured since last analysis, last analysis timestamp, failed days, DRM tier stats, and a one-click **Analyze** button for on-demand analysis with a live loading spinner
+- **Patterns** — clickable day/week/month cards with full analysis detail panels (per-criterion scores, patterns, suggestions, rewritten prompt)
+- **Analyzer** — paste any prompt and run a single-prompt spot analysis; returns per-criterion scores, patterns, improvement suggestions, and a rewritten version
 - **Last Prompts** — the 10 most recently logged prompts
 
 **API endpoints** (consumable by any HTTP client):
