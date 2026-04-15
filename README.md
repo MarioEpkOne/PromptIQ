@@ -1,6 +1,6 @@
 # PromptIQ
 
-**Prompt analytics for Claude Code.** PromptIQ silently captures every prompt you send, scores them against a customizable rubric using the Claude API, and builds a Decaying-Resolution Memory (DRM) of your prompting patterns over weeks and months — so you can consistently level up the way you communicate with AI. It also ships an Analyzer tab where you can paste any prompt and get instant per-criterion feedback, so you can test and refine prompts before you send them.
+**Prompt analytics for Claude Code.** PromptIQ silently captures every prompt you send, scores them against a customizable rubric using the Claude API, and builds a Decaying-Resolution Memory (DRM) of your prompting patterns over weeks and months — so you can consistently level up the way you communicate with AI. Comes with an Analyzer tab where you can paste any prompt and get instant per-criterion feedback, so you can test and refine prompts before you send them.
 
 ---
 
