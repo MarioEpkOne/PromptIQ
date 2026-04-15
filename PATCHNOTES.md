@@ -1,5 +1,10 @@
-<!-- last-commit: 722c720a8b88cd2c7b38890244a0ac62f64ee530 -->
+<!-- last-commit: 4a99b3a46563c1a28c7d2dfebdf9760c6f74739f -->
 # Patch Notes
+
+## v0.5.0 — 2026-04-15
+
+### increase spot-analyzer character limit from 300 to 500
+The spot-analyzer now accepts prompts up to 500 characters — both the backend API validation and the web dashboard textarea, counter display, and warning threshold have been updated to reflect the new limit.
 
 ## v0.4.0 — 2026-04-15
 
