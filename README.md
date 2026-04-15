@@ -65,6 +65,8 @@ Register the Claude Code hook in `~/.claude/settings.json` to start logging auto
 | `promptiq serve [--port N]` | Start the local web dashboard (default: port 4242) |
 | `promptiq schedule [--time HH:MM]` | Install daily cron job + optional startup catch-up |
 | `promptiq log` | Append the current prompt to today's JSONL (called by the hook) |
+| `promptiq feedback [--acted] [--date YYYY-MM-DD]` | Record whether you acted on the last analysis tip |
+| `promptiq mcp [--setup]` | Start the MCP stdio server; `--setup` prints the Claude Code config snippet |
 
 ---
 
@@ -160,6 +162,8 @@ GET /api/status          → today count, DRM summary
 GET /api/patterns        → day/week/month list for display
 GET /api/last            → last 10 raw prompts
 GET /api/detail?type=day|week|month&id=<id>  → full analysis detail
+POST /api/run-analysis         → trigger a full analysis (same as promptiq analyze)
+POST /api/analyze-prompt       → single-prompt spot analysis (body: { prompt: string })
 ```
 
 ### Automation
@@ -172,6 +176,8 @@ GET /api/detail?type=day|week|month&id=<id>  → full analysis detail
 ```
 
 The API key is embedded directly in crontab so the job works in non-login shells without sourcing `.bashrc`. The `catchup` command on reboot handles any days that were missed while the machine was off.
+
+**MCP integration (alternative to the hook):** `promptiq mcp --setup` prints the JSON snippet to add to your Claude Code MCP config. Once registered, Claude Code connects to PromptIQ as an MCP server — no `UserPromptSubmit` hook needed. Run `promptiq mcp` to start the server manually.
 
 ---
 
@@ -227,6 +233,7 @@ src/
 ├── rubric.ts       rubric.md loading; embedded fallback defaults
 ├── renderer.ts     Terminal output; chalk formatting; badge rendering
 ├── server.ts       HTTP server; embedded dashboard HTML/CSS/JS; REST API
+├── mcp.ts          MCP stdio server; alternative integration surface for Claude Code
 └── types.ts        Shared TypeScript interfaces (LogEntry, DayAnalysis, etc.)
 
 ~/.promptiq/
@@ -427,6 +434,8 @@ PromptIQ supports four trigger surfaces:
 | **Claude Code hook** | `UserPromptSubmit` → `promptiq log` | Automatic per-prompt logging |
 | **Cron** | `promptiq schedule` | Daily automated analysis |
 | **Reboot** | `@reboot` crontab entry | Startup catch-up + serve |
+| **Web dashboard** | Analyze button → `POST /api/run-analysis` | On-demand analysis without the terminal |
+| **MCP server** | `promptiq mcp` | Claude Code native integration via MCP protocol |
 
 Each surface hits the same underlying functions. There is no "CLI mode" vs "hook mode" — the same `logger.ts` and `analyzer.ts` are called regardless of trigger surface.
 
