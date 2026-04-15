@@ -85,7 +85,7 @@ The hook never throws. If the data directory doesn't exist it's created silently
 
 `promptiq analyze` loads today's JSONL, strips control prompts (see [Prompt Classification](#prompt-classification)), and calls the Claude API **once** with all remaining prompts in a single batch. Claude is given your rubric as the system prompt and returns a structured `report_analysis` tool call — never free-form text.
 
-**Wire format vs storage format**: when the analysis call is assembled, the rubric and each prompt are wrapped in XML tags (`<rubric criteria="N">` and `<prompt index="1">`) and all content is XML-escaped via `escapeXml()`. This structures the LLM input and prevents prompt injection from user-authored rubric files. The results that come back are then stored on disk as JSON (see [Data Storage](#data-storage)) — the XML is only used for the API call itself.
+**Wire format**: when the analysis call is assembled, the rubric and each prompt are wrapped in XML tags (`<rubric criteria="N">` and `<prompt index="1">`). Claude is trained to parse XML-delimited content with high reliability — it cleanly separates instructions from data, reducing misinterpretation and making boundary errors essentially impossible. All content is XML-escaped via `escapeXml()` to prevent prompt injection from user-authored rubric files or multi-line prompts. The results that come back are stored on disk as JSON (see [Data Storage](#data-storage)) — the XML exists only inside the API call.
 
 The tool call extracts:
 
