@@ -42,13 +42,13 @@ PromptIQ is a developer tool that treats prompts as measurable engineering artif
 ## Quick Start
 
 ```bash
-npm install -g promptiq
+pnpm install -g piq
 export ANTHROPIC_API_KEY=sk-ant-...
-promptiq analyze   # score today's prompts
-promptiq serve     # open the dashboard
+piq analyze   # score today's prompts
+piq serve     # open the dashboard
 ```
 
-Register the Claude Code hook in `~/.claude/settings.json` to start logging automatically — see [Configuration](#configuration). For scheduling and WSL setup, see [`promptiq schedule`](#commands).
+Register the Claude Code hook in `~/.claude/settings.json` to start logging automatically — see [Configuration](#configuration). For scheduling and WSL setup, see [`piq schedule`](#commands).
 
 ---
 
@@ -56,17 +56,19 @@ Register the Claude Code hook in `~/.claude/settings.json` to start logging auto
 
 | Command | Description |
 |---|---|
-| `promptiq analyze` | Score today's prompts, update DRM, print analysis with main tip |
-| `promptiq catchup` | Analyze any missed days (useful after the laptop was off) |
-| `promptiq status` | Today's count, last analysis date, DRM summary |
-| `promptiq patterns` | Weekly and monthly pattern trends in the terminal |
-| `promptiq last [n]` | Show the last *n* logged prompts (default: 10) |
-| `promptiq rubric` | Open your rubric in `$EDITOR` |
-| `promptiq serve [--port N]` | Start the local web dashboard (default: port 80) |
-| `promptiq schedule [--time HH:MM] [--on-startup] [--remove]` | Install daily cron job; `--on-startup` adds a reboot catch-up+serve job; `--remove` removes all scheduled jobs |
-| `promptiq log` | Append the current prompt to today's JSONL (called by the hook) |
-| `promptiq feedback [--acted] [--date YYYY-MM-DD]` | Record whether you acted on the last analysis tip |
-| `promptiq mcp [--setup]` | Start the MCP stdio server; `--setup` prints the Claude Code config snippet |
+| `piq analyze` | Score today's prompts, update DRM, print analysis with main tip |
+| `piq catchup` | Analyze any missed days (useful after the laptop was off) |
+| `piq status` | Today's count, last analysis date, DRM summary |
+| `piq patterns` | Weekly and monthly pattern trends in the terminal |
+| `piq last [n]` | Show the last *n* logged prompts (default: 10) |
+| `piq rubric` | Open your rubric in `$EDITOR` |
+| `piq serve [--port N]` | Start the local web dashboard (default: port 80) |
+| `piq start [--port N]` | Start the web dashboard as a background daemon |
+| `piq stop` | Stop the background web dashboard daemon |
+| `piq schedule [--time HH:MM] [--on-startup] [--remove]` | Install daily cron job; `--on-startup` adds a reboot catch-up+serve job; `--remove` removes all scheduled jobs |
+| `piq log` | Append the current prompt to today's JSONL (called by the hook) |
+| `piq feedback [--acted] [--date YYYY-MM-DD]` | Record whether you acted on the last analysis tip |
+| `piq mcp [--setup]` | Start the MCP stdio server; `--setup` prints the Claude Code config snippet |
 
 ---
 
@@ -74,7 +76,7 @@ Register the Claude Code hook in `~/.claude/settings.json` to start logging auto
 
 ### Silent Logging
 
-Every prompt you submit in Claude Code triggers the `UserPromptSubmit` hook, which calls `promptiq log`. This is a **pure disk write** — it appends one JSON line to `~/.promptiq/daily/YYYY-MM-DD.jsonl` and exits with code 0, unconditionally. No API call, no network, no blocking.
+Every prompt you submit in Claude Code triggers the `UserPromptSubmit` hook, which calls `piq log`. This is a **pure disk write** — it appends one JSON line to `~/.promptiq/daily/YYYY-MM-DD.jsonl` and exits with code 0, unconditionally. No API call, no network, no blocking.
 
 ```jsonl
 {"timestamp":"2026-04-14T15:30:00Z","prompt":"Refactor the login handler to..."}
@@ -85,7 +87,7 @@ The hook never throws. If the data directory doesn't exist it's created silently
 
 ### Scoring & Analysis
 
-`promptiq analyze` loads today's JSONL, strips control prompts (see [Prompt Classification](#prompt-classification)), and calls the Claude API **once** with all remaining prompts in a single batch. Claude is given your rubric as the system prompt and returns a structured `report_analysis` tool call — never free-form text.
+`piq analyze` loads today's JSONL, strips control prompts (see [Prompt Classification](#prompt-classification)), and calls the Claude API **once** with all remaining prompts in a single batch. Claude is given your rubric as the system prompt and returns a structured `report_analysis` tool call — never free-form text.
 
 **Wire format**: when the analysis call is assembled, the rubric and each prompt are wrapped in XML tags (`<rubric criteria="N">` and `<prompt index="1">`). Claude is trained to parse XML-delimited content with high reliability — it cleanly separates instructions from data, reducing misinterpretation and making boundary errors essentially impossible. All content is XML-escaped via `escapeXml()` to prevent prompt injection from user-authored rubric files or multi-line prompts. The results that come back are stored on disk as JSON (see [Data Storage](#data-storage)) — the XML exists only inside the API call.
 
@@ -144,7 +146,7 @@ The minimum length threshold (default: 10 characters) provides a final safety ne
 
 ### Web Dashboard
 
-`promptiq serve` starts a local HTTP server with an embedded single-page dashboard (no build step, no external dependencies).
+`piq serve` starts a local HTTP server with an embedded single-page dashboard (no build step, no external dependencies).
 
 **Tabs:**
 
@@ -160,22 +162,22 @@ GET /api/status          → today count, DRM summary
 GET /api/patterns        → day/week/month list for display
 GET /api/last            → last 10 raw prompts
 GET /api/detail?type=day|week|month&id=<id>  → full analysis detail
-POST /api/run-analysis         → trigger a full analysis (same as promptiq analyze)
+POST /api/run-analysis         → trigger a full analysis (same as piq analyze)
 POST /api/analyze-prompt       → single-prompt spot analysis (body: { prompt: string })
 ```
 
 ### Automation
 
-`promptiq schedule` installs two crontab entries:
+`piq schedule` installs two crontab entries:
 
 ```cron
-0 23 * * *  ANTHROPIC_API_KEY=sk-ant-... /usr/bin/promptiq analyze
-@reboot     ANTHROPIC_API_KEY=sk-ant-... /usr/bin/promptiq catchup && promptiq serve
+0 23 * * *  ANTHROPIC_API_KEY=sk-ant-... /usr/bin/piq analyze
+@reboot     ANTHROPIC_API_KEY=sk-ant-... /usr/bin/piq catchup && piq serve
 ```
 
 The API key is embedded directly in crontab so the job works in non-login shells without sourcing `.bashrc`. The `catchup` command on reboot handles any days that were missed while the machine was off.
 
-**MCP integration (alternative to the hook):** `promptiq mcp --setup` prints the JSON snippet to add to your Claude Code MCP config. Once registered, Claude Code connects to PromptIQ as an MCP server — no `UserPromptSubmit` hook needed. Run `promptiq mcp` to start the server manually.
+**MCP integration (alternative to the hook):** `piq mcp --setup` prints the JSON snippet to add to your Claude Code MCP config. Once registered, Claude Code connects to PromptIQ as an MCP server — no `UserPromptSubmit` hook needed. Run `piq mcp` to start the server manually.
 
 ---
 
@@ -196,7 +198,7 @@ Your rubric lives at `~/.promptiq/rubric.md`. It is passed verbatim as the syste
 To edit:
 
 ```bash
-promptiq rubric   # opens in $EDITOR
+piq rubric   # opens in $EDITOR
 ```
 
 ---
@@ -208,6 +210,8 @@ promptiq rubric   # opens in $EDITOR
 | `~/.promptiq/rubric.md` | Scoring criteria and weights |
 | `~/.promptiq/classifier.json` | Additional control-prompt regex patterns |
 | `~/.claude/settings.json` | Claude Code hook registration |
+
+> **Migration note (v0.4.0 rename):** The binary was renamed from `promptiq` to `piq`. If you previously registered `promptiq log` in `~/.claude/settings.json`, update the hook command to `piq log`. If you set up cron jobs with `promptiq schedule`, re-run `piq schedule` to write fresh entries pointing to the `piq` binary — old `promptiq`-based cron entries will not fire after reinstall.
 
 **Environment variables:**
 
@@ -250,10 +254,10 @@ src/
 Claude Code session
       │
       ▼  (UserPromptSubmit hook — zero latency, no network)
-promptiq log  ──→  ~/.promptiq/daily/YYYY-MM-DD.jsonl
+piq log  ──→  ~/.promptiq/daily/YYYY-MM-DD.jsonl
                           │
                           ▼  (on-demand or cron)
-promptiq analyze  ──→  classifier  ──→  Claude API (single batch call)
+piq analyze  ──→  classifier  ──→  Claude API (single batch call)
                                               │
                                         report_analysis tool
                                               │
@@ -345,7 +349,7 @@ Every write follows a strict order:
 2. Only after a successful write is the DRM rollup triggered
 3. Daily JSONL files are **deleted only after** their weekly record is confirmed on disk
 
-There is no in-memory cache that can diverge from disk. If `promptiq analyze` crashes midway, the next run re-reads the weekly file (which may be partial) and the daily JSONL (which still exists) and recovers correctly. The rollup is idempotent.
+There is no in-memory cache that can diverge from disk. If `piq analyze` crashes midway, the next run re-reads the weekly file (which may be partial) and the daily JSONL (which still exists) and recovers correctly. The rollup is idempotent.
 
 ---
 
@@ -353,11 +357,11 @@ There is no in-memory cache that can diverge from disk. If `promptiq analyze` cr
 
 > *Agent execution supports simple lifecycle control: start, stop, and resume.*
 
-**Launch**: `promptiq analyze` — runs the full pipeline synchronously, exits when complete.
+**Launch**: `piq analyze` — runs the full pipeline synchronously, exits when complete.
 
-**Pause / Resume via `catchup`**: If the machine was off for three days, `promptiq catchup` iterates missed dates, runs analysis for each (skipping days with fewer than 3 task prompts), and applies the DRM rollup. The resume is safe to run multiple times — days already analyzed are skipped.
+**Pause / Resume via `catchup`**: If the machine was off for three days, `piq catchup` iterates missed dates, runs analysis for each (skipping days with fewer than 3 task prompts), and applies the DRM rollup. The resume is safe to run multiple times — days already analyzed are skipped.
 
-**Scheduled lifecycle**: `promptiq schedule` installs cron jobs that manage the daily launch automatically, including an `@reboot` job that resumes catch-up on machine restart.
+**Scheduled lifecycle**: `piq schedule` installs cron jobs that manage the daily launch automatically, including an `@reboot` job that resumes catch-up on machine restart.
 
 ---
 
@@ -369,7 +373,7 @@ The `mainTip` field is the primary human-in-the-loop touchpoint. It is always:
 
 - A **single** improvement (not a list the human must prioritize)
 - Accompanied by a `why` field explaining the reasoning
-- Shown prominently at the top of `promptiq analyze` output and in the web dashboard
+- Shown prominently at the top of `piq analyze` output and in the web dashboard
 
 The design deliberately does not auto-apply suggestions or modify prompting behavior. Every insight surfaces as an observation for the human to act on. The agent analyzes; the human decides.
 
@@ -395,11 +399,11 @@ The rollup logic (`drm.ts`) is pure TypeScript: date arithmetic, file I/O, objec
 
 > *Errors are concise, informative, and fit within the context window.*
 
-**Hook errors are swallowed.** `promptiq log` always exits 0. A logging failure must never interrupt a Claude Code session.
+**Hook errors are swallowed.** `piq log` always exits 0. A logging failure must never interrupt a Claude Code session.
 
 **Analysis errors are localized.** If the weekly synthesis fails (network error, API timeout), `synthesizeWeek()` falls back to concatenating per-day summaries. The user gets a slightly less polished weekly view, not a crash. `analyzeToday()` itself throws on failure — the daily JSONL is preserved so the user can retry.
 
-**CLI errors print one line.** No stack traces to stdout in production mode. Errors surface as `promptiq: <message>` and exit 1.
+**CLI errors print one line.** No stack traces to stdout in production mode. Errors surface as `piq: <message>` and exit 1.
 
 **DRM errors are non-fatal.** If the rollup fails (e.g. corrupted JSON), the error is logged and the command exits successfully — today's analysis is already written; the rollup can be retried.
 
@@ -430,12 +434,12 @@ PromptIQ supports six trigger surfaces:
 
 | Surface | How | Use case |
 |---|---|---|
-| **CLI** | `promptiq analyze` | On-demand, interactive use |
-| **Claude Code hook** | `UserPromptSubmit` → `promptiq log` | Automatic per-prompt logging |
-| **Cron** | `promptiq schedule` | Daily automated analysis |
+| **CLI** | `piq analyze` | On-demand, interactive use |
+| **Claude Code hook** | `UserPromptSubmit` → `piq log` | Automatic per-prompt logging |
+| **Cron** | `piq schedule` | Daily automated analysis |
 | **Reboot** | `@reboot` crontab entry | Startup catch-up + serve |
 | **Web dashboard** | Analyze button → `POST /api/run-analysis` | On-demand analysis without the terminal |
-| **MCP server** | `promptiq mcp` | Claude Code native integration via MCP protocol |
+| **MCP server** | `piq mcp` | Claude Code native integration via MCP protocol |
 
 Each surface hits the same underlying functions. There is no "CLI mode" vs "hook mode" — the same `logger.ts` and `analyzer.ts` are called regardless of trigger surface.
 
@@ -504,15 +508,15 @@ All data is local to `~/.promptiq/`. No cloud sync, no telemetry, no external da
 
 ## Running in the Background (WSL / Linux)
 
-Port 80 requires elevated privileges. The recommended setup uses a helper script that starts the server as a background process, guards against duplicate instances, and always uses the correct port and API key.
+Port 80 requires elevated privileges. Use the built-in daemon commands:
 
 ```bash
-piq start   # start the dashboard in the background
+piq start   # start the dashboard in the background (auto-sudo for port 80)
 piq stop    # stop it
 piq         # show available commands
 ```
 
-Set this up by adding a `piq` shell function to your `~/.bashrc` and a startup script that sources your API key file and runs `sudo node dist/cli.js serve` in the background. See the script at `~/promptiq.sh` if you have the WSL setup.
+`piq start` spawns the web dashboard as a detached background process, writes its PID to `~/.promptiq/serve.pid`, and opens the browser. `piq stop` sends SIGTERM and removes the PID file.
 
 ---
 

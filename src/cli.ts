@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
 import * as path from 'path';
+import * as fs from 'fs';
 
 import { runLog, readTodayEntries, readEntriesForDate, listDailyDates, ensureDirectories } from './logger.js';
 import { loadRubric, copyDefaultRubric, rubricPath } from './rubric.js';
@@ -21,12 +22,37 @@ import { startMcpServer } from './mcp.js';
 // Resolve assets dir relative to compiled output (dist/) or source (src/)
 const assetsDir = path.resolve(__dirname, '..', 'assets');
 
+// ---------------------------------------------------------------------------
+// Daemon helpers (used by start / stop)
+// ---------------------------------------------------------------------------
+
+function readPid(pidFile: string): number | null {
+  try {
+    const raw = fs.readFileSync(pidFile, 'utf8').trim();
+    const n = parseInt(raw, 10);
+    return isNaN(n) ? null : n;
+  } catch { return null; }
+}
+
+function isAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; }
+  catch { return false; }
+}
+
+function openBrowser(url: string): void {
+  const { exec } = require('child_process') as typeof import('child_process');
+  exec(
+    `xdg-open "${url}" 2>/dev/null || cmd.exe /c start "" "${url}" 2>/dev/null || true`,
+    () => { /* ignore errors */ },
+  );
+}
+
 const program = new Command();
 
 program
-  .name('promptiq')
+  .name('piq')
   .description('Prompt analytics CLI for Claude Code')
-  .version('0.1.0');
+  .version('0.3.0');
 
 // ---------------------------------------------------------------------------
 // Internal command: log (hidden from help)
@@ -40,7 +66,7 @@ const logCommand = new Command('log')
       await runLog(options.file);
     } catch (err) {
       // Silent failure — must not block Claude Code
-      process.stderr.write(`promptiq log error: ${String(err)}\n`);
+      process.stderr.write(`piq log error: ${String(err)}\n`);
       process.exit(0); // exit 0 so Claude Code hook is not interrupted
     }
   });
@@ -219,7 +245,7 @@ program
 
     server.on('error', (err: NodeJS.ErrnoException) => {
       if (err.code === 'EADDRINUSE') {
-        console.error(`Port ${port} is in use. Try: PROMPTIQ_PORT=${port + 1} promptiq serve`);
+        console.error(`Port ${port} is in use. Try: PROMPTIQ_PORT=${port + 1} piq serve`);
       } else {
         console.error(`Server error: ${String(err)}`);
       }
@@ -239,6 +265,99 @@ program
         );
       }
     });
+  });
+
+// ---------------------------------------------------------------------------
+// start — background daemon wrapper around serve
+// ---------------------------------------------------------------------------
+program
+  .command('start')
+  .description('Start the web dashboard as a background daemon')
+  .option('-p, --port <number>', 'Port to listen on', '80')
+  .action(async (options: { port: string }) => {
+    const port = parseInt(process.env.PROMPTIQ_PORT ?? options.port, 10);
+    const { promptiqDir } = require('./logger.js') as typeof import('./logger.js');
+    const pidFile = path.join(promptiqDir(), 'serve.pid');
+    const logFile = path.join(promptiqDir(), 'serve.log');
+
+    // --- guard: already running ---
+    const existingPid = readPid(pidFile);
+    if (existingPid !== null && isAlive(existingPid)) {
+      const url = `http://promptiq:${port}`;
+      console.log(`PromptIQ is already running (PID ${existingPid}) at ${url}`);
+      openBrowser(url);
+      process.exit(0);
+    }
+
+    // --- stale PID file cleanup ---
+    if (existingPid !== null && !isAlive(existingPid)) {
+      try { fs.unlinkSync(pidFile); } catch { /* ignore */ }
+    }
+
+    // --- guard: needs root for low port ---
+    if (port < 1024 && process.getuid!() !== 0) {
+      const { spawnSync } = require('child_process') as typeof import('child_process');
+      const result = spawnSync(
+        'sudo',
+        [process.argv[0], process.argv[1], 'start', '--port', String(port)],
+        { stdio: 'inherit' },
+      );
+      process.exit(result.status ?? 1);
+    }
+
+    // --- spawn detached serve process ---
+    ensureDirectories();
+    const { spawn } = require('child_process') as typeof import('child_process');
+    const logFd = fs.openSync(logFile, 'a');
+    const child = spawn(
+      process.argv[0],
+      [process.argv[1], 'serve', '--no-open', '--port', String(port)],
+      { detached: true, stdio: ['ignore', logFd, logFd] },
+    );
+    // Close the fd in the parent — child has its own copy after fork
+    fs.closeSync(logFd);
+
+    // Write PID before unref — must be atomic and before parent exits
+    fs.writeFileSync(pidFile, String(child.pid), 'utf8');
+    child.unref();
+
+    const url = `http://promptiq:${port}`;
+    console.log(`PromptIQ started (PID ${child.pid}) at ${url}`);
+    console.log(`Logs: ${logFile}`);
+    openBrowser(url);
+  });
+
+// ---------------------------------------------------------------------------
+// stop — terminate the background daemon
+// ---------------------------------------------------------------------------
+program
+  .command('stop')
+  .description('Stop the background web dashboard daemon')
+  .action(() => {
+    const { promptiqDir } = require('./logger.js') as typeof import('./logger.js');
+    const pidFile = path.join(promptiqDir(), 'serve.pid');
+    const pid = readPid(pidFile);
+
+    if (pid === null) {
+      console.log('PromptIQ is not running.');
+      process.exit(0);
+    }
+
+    if (!isAlive(pid)) {
+      // Stale PID file — clean up and report
+      try { fs.unlinkSync(pidFile); } catch { /* ignore */ }
+      console.log('PromptIQ is not running (stale PID file removed).');
+      process.exit(0);
+    }
+
+    try {
+      process.kill(pid, 'SIGTERM');
+      fs.unlinkSync(pidFile);
+      console.log(`PromptIQ stopped (PID ${pid}).`);
+    } catch (err) {
+      console.error(`Failed to stop process ${pid}: ${String(err)}`);
+      process.exit(1);
+    }
   });
 
 // ---------------------------------------------------------------------------
@@ -344,7 +463,7 @@ program
   .option('--date <YYYY-MM-DD>', 'Target date (default: yesterday)')
   .action((options: { acted?: boolean; date?: string }) => {
     if (!options.acted) {
-      console.error('Usage: promptiq feedback --acted [--date YYYY-MM-DD]');
+      console.error('Usage: piq feedback --acted [--date YYYY-MM-DD]');
       process.exit(1);
     }
 
@@ -392,9 +511,9 @@ program
       binaryPath = require('path').resolve(process.argv[1]);
     } catch {
       try {
-        binaryPath = execSync('which promptiq', { encoding: 'utf-8' }).trim();
+        binaryPath = execSync('which piq', { encoding: 'utf-8' }).trim();
       } catch {
-        console.error('Could not determine promptiq binary path. Make sure promptiq is on your PATH.');
+        console.error('Could not determine piq binary path. Make sure piq is on your PATH.');
         process.exit(1);
       }
     }
@@ -478,7 +597,7 @@ program
 
     if (newLines.length === 0) {
       console.log('Nothing to add — all requested jobs already scheduled.');
-      console.log('Use `promptiq schedule --remove` to remove.');
+      console.log('Use `piq schedule --remove` to remove.');
       return;
     }
 
@@ -495,7 +614,7 @@ program
       if (!apiKey) {
         console.log('');
         console.log('Warning: ANTHROPIC_API_KEY was not set in the current environment.');
-        console.log('Add it to your shell profile and re-run `promptiq schedule` to embed it.');
+        console.log('Add it to your shell profile and re-run `piq schedule` to embed it.');
       }
     } catch (err) {
       console.error(`Failed to update crontab: ${String(err)}`);

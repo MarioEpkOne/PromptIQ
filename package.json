@@ -3,7 +3,7 @@
   "version": "0.3.0",
   "description": "Prompt analytics CLI for Claude Code — captures, scores, and tracks prompt quality over time",
   "bin": {
-    "promptiq": "./dist/cli.js"
+    "piq": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsup src/cli.ts --format cjs --dts --out-dir dist",
