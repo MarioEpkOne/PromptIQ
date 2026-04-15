@@ -6,11 +6,16 @@ import type { LogEntry } from './types.js';
 
 /**
  * Returns the path to the promptiq data directory.
- * Checks PROMPTIQ_HOME env var first (used in tests), then falls back to ~/.promptiq.
+ * Checks PROMPTIQ_HOME env var first (used in tests), then the invoking user's
+ * home when running under sudo (SUDO_USER), then falls back to os.homedir().
  */
 export function promptiqDir(): string {
   if (process.env.PROMPTIQ_HOME) {
     return path.join(process.env.PROMPTIQ_HOME, '.promptiq');
+  }
+  if (process.env.SUDO_USER) {
+    const sudoHome = path.join('/home', process.env.SUDO_USER);
+    return path.join(sudoHome, '.promptiq');
   }
   return path.join(os.homedir(), '.promptiq');
 }
