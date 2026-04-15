@@ -1,6 +1,6 @@
 {
   "name": "promptiq",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Prompt analytics CLI for Claude Code — captures, scores, and tracks prompt quality over time",
   "bin": {
     "promptiq": "./dist/cli.js"
@@ -51,6 +51,8 @@
     "node": ">=18"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }
