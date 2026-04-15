@@ -62,7 +62,7 @@ Register the Claude Code hook in `~/.claude/settings.json` to start logging auto
 | `promptiq patterns` | Weekly and monthly pattern trends in the terminal |
 | `promptiq last [n]` | Show the last *n* logged prompts (default: 10) |
 | `promptiq rubric` | Open your rubric in `$EDITOR` |
-| `promptiq serve [--port N]` | Start the local web dashboard (default: port 80) |
+| `promptiq serve [--port N]` | Start the local web dashboard (default: port 4242) |
 | `promptiq schedule [--time HH:MM]` | Install daily cron job + optional startup catch-up |
 | `promptiq log` | Append the current prompt to today's JSONL (called by the hook) |
 
@@ -133,9 +133,12 @@ You can extend this list in `~/.promptiq/classifier.json`:
 
 ```json
 {
-  "patterns": ["^approved$", "^ship it$", "^merge$"]
+  "additionalPatterns": ["^approved$", "^ship it$", "^merge$"],
+  "excludeDefaults": false
 }
 ```
+
+Set `excludeDefaults: true` to disable all built-in patterns and use only the patterns you supply.
 
 The minimum length threshold (default: 11 characters) provides a final safety net.
 
@@ -180,11 +183,11 @@ Your rubric lives at `~/.promptiq/rubric.md`. It is passed verbatim as the syste
 
 | Criterion | Weight | What it measures |
 |---|---|---|
-| Clarity | 25% | Is the intent unambiguous? |
-| Context | 20% | Does the prompt give sufficient background? |
-| Constraints | 20% | Are limits and requirements stated? |
-| Expected Output | 20% | Is the desired result format described? |
-| Scope | 15% | Is the task appropriately bounded? |
+| Clarity | 1.0 | Is the intent unambiguous? |
+| Context | 1.0 | Does the prompt include enough background? |
+| Output Format | 0.8 | Does the prompt specify the response format or structure? |
+| Scope | 0.8 | Is the prompt focused — not too broad or over-specified? |
+| Examples | 0.5 | Where helpful, does the prompt include examples? |
 
 To edit:
 
@@ -208,7 +211,7 @@ promptiq rubric   # opens in $EDITOR
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Yes | Anthropic API key for analysis calls |
 | `PROMPTIQ_HOME` | No | Override `~/.promptiq` data directory (used in tests) |
-| `PROMPTIQ_PORT` | No | Default port for `serve` (default: 80) |
+| `PROMPTIQ_PORT` | No | Default port for `serve` (default: 4242) |
 
 ---
 
