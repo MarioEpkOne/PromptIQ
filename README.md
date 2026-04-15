@@ -34,40 +34,21 @@ PromptIQ is a developer tool that treats prompts as measurable engineering artif
 - **Pattern detection** — recurring weaknesses (e.g. "missing expected output format" appearing 3 weeks running) surface as persistent patterns
 - **Actionable tips** — each analysis produces a single highest-leverage `mainTip` with a concrete before/after example
 - **Long-term memory** — the DRM system compresses daily logs into weekly and monthly summaries, keeping storage O(1) over time
-- **Web dashboard** — browse your history by day, week, and month with a local HTTP server
+- **Web dashboard** — Status, Patterns, and Last Prompts tabs for browsing your history; an **Analyzer tab** for on-demand single-prompt scoring and rewriting
+- **On-demand analysis** — trigger a full analysis from the dashboard without touching the terminal
 
 ---
 
 ## Quick Start
 
-**Prerequisites**: Node.js 18+, an Anthropic API key.
-
 ```bash
-# 1. Install
 npm install -g promptiq
-
-# 2. Set your API key
 export ANTHROPIC_API_KEY=sk-ant-...
-
-# 3. Wire up the Claude Code hook — add to ~/.claude/settings.json:
-#    {
-#      "hooks": {
-#        "UserPromptSubmit": [
-#          { "hooks": [{ "type": "command", "command": "promptiq log" }] }
-#        ]
-#      }
-#    }
-
-# 4. Use Claude Code normally — prompts are now logged silently
-
-# 5. Analyze today's prompts
-promptiq analyze
-
-# 6. Open the web dashboard
-promptiq serve
+promptiq analyze   # score today's prompts
+promptiq serve     # open the dashboard
 ```
 
-> **WSL users**: After running `promptiq schedule`, start cron with `sudo service cron start` and add it to your WSL startup.
+Register the Claude Code hook in `~/.claude/settings.json` to start logging automatically — see [Configuration](#configuration). For scheduling and WSL setup, see [`promptiq schedule`](#commands).
 
 ---
 
@@ -104,7 +85,7 @@ The hook never throws. If the data directory doesn't exist it's created silently
 
 `promptiq analyze` loads today's JSONL, strips control prompts (see [Prompt Classification](#prompt-classification)), and calls the Claude API **once** with all remaining prompts in a single batch. Claude is given your rubric as the system prompt and returns a structured `report_analysis` tool call — never free-form text.
 
-The rubric and each prompt are injected using structured XML tags (`<rubric criteria="N">` and `<prompt index="1">`) with all content XML-escaped via `escapeXml()`. This prevents prompt injection from user-authored rubric files or multi-line prompts containing special characters.
+**Wire format vs storage format**: when the analysis call is assembled, the rubric and each prompt are wrapped in XML tags (`<rubric criteria="N">` and `<prompt index="1">`) and all content is XML-escaped via `escapeXml()`. This structures the LLM input and prevents prompt injection from user-authored rubric files. The results that come back are then stored on disk as JSON (see [Data Storage](#data-storage)) — the XML is only used for the API call itself.
 
 The tool call extracts:
 
@@ -465,15 +446,15 @@ The DRM rollup is similarly deterministic: given the same set of weekly files, i
 
 ## Data Storage
 
-All data is local to `~/.promptiq/`. No cloud sync, no telemetry, no external database.
+All data is local to `~/.promptiq/`. No cloud sync, no telemetry, no external database. Everything on disk is JSON or JSONL — the XML format is only used internally when constructing LLM requests (see [Scoring & Analysis](#scoring--analysis)).
 
-**Daily JSONL** (`~/.promptiq/daily/YYYY-MM-DD.jsonl`):
+**Daily log** (`~/.promptiq/daily/YYYY-MM-DD.jsonl`) — one JSON line per prompt:
 ```jsonl
 {"timestamp":"2026-04-14T15:30:00Z","prompt":"Refactor the login handler..."}
 {"timestamp":"2026-04-14T16:02:00Z","prompt":"ok"}
 ```
 
-**Weekly JSON** (`~/.promptiq/weekly/YYYY-WNN.json`):
+**Weekly analysis record** (`~/.promptiq/weekly/YYYY-WNN.json`) — JSON, one file per ISO week:
 ```json
 {
   "week": "2026-W15",
@@ -492,7 +473,7 @@ All data is local to `~/.promptiq/`. No cloud sync, no telemetry, no external da
 }
 ```
 
-**Monthly JSON** (`~/.promptiq/monthly/YYYY-MM.json`):
+**Monthly summary** (`~/.promptiq/monthly/YYYY-MM.json`) — JSON, compressed from weekly records:
 ```json
 {
   "month": "2026-04",
