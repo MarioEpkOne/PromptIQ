@@ -81,14 +81,14 @@ Your analysis must:
 1. Score each criterion independently on a 0–1 scale
 2. Identify up to 3 patterns from this canonical list: missing-context, vague-scope, no-constraints, missing-language, no-edge-cases, ambiguous-intent, missing-format, too-broad
 3. List the 3 highest-impact improvements, each linked to a specific criterion
-4. Rewrite the prompt incorporating all improvements
+4. Rewrite the prompt incorporating all improvements. The rewrite must be grammatically correct, written in fluent natural English exactly as a human would write it — no mechanical phrasing, no XML tags, no bullet points, just the improved prompt text
 5. For each improvement, give a one-line reason stating what changed and why`;
 
   const client = new Anthropic({ apiKey });
 
   const response = await client.messages.create({
     model: 'claude-sonnet-4-6',
-    max_tokens: 1024,
+    max_tokens: 2048,
     system: systemPrompt,
     tools: [ANALYZE_SINGLE_PROMPT_TOOL],
     tool_choice: { type: 'tool', name: 'analyze_single_prompt' },

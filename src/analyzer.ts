@@ -95,8 +95,8 @@ const REPORT_ANALYSIS_TOOL: Anthropic.Tool = {
           properties: {
             patternId: { type: 'string' },
             text: { type: 'string' },
-            before: { type: 'string' },
-            after: { type: 'string' },
+            before: { type: 'string', description: 'A realistic example of a weak prompt exhibiting this pattern. Must be grammatically correct, natural English — written exactly as a human would write it.' },
+            after: { type: 'string', description: 'An improved rewrite of the before prompt that fixes the pattern. Must be grammatically correct, fluent, and clearly better — no mechanical or template-style phrasing.' },
           },
           required: ['patternId', 'text'],
         },
