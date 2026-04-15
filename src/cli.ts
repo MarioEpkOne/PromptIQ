@@ -209,8 +209,8 @@ program
 // ---------------------------------------------------------------------------
 program
   .command('serve')
-  .description('Start local web dashboard at http://promptiq:4242')
-  .option('-p, --port <number>', 'Port to listen on', '4242')
+  .description('Start local web dashboard at http://promptiq')
+  .option('-p, --port <number>', 'Port to listen on', '80')
   .option('--no-open', 'Do not open the browser automatically (useful for background/startup use)')
   .action((options: { port: string; open: boolean }) => {
     ensureDirectories();
