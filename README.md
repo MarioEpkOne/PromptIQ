@@ -126,10 +126,7 @@ The DRM rollup runs automatically at the end of every `analyze` call. No manual 
 
 Before scoring, prompts are classified as **task prompts** or **control prompts**. Control prompts — one-word confirmations, emoji responses, yes/no replies — are excluded from scoring because they carry no signal about prompting quality.
 
-Built-in control patterns:
-```
-yes | no | ok | proceed | lgtm | 👍 | continue | done | sure | yep | nope
-```
+Built-in control patterns cover single-word confirmations (`yes`, `no`, `ok`, `done`…), short affirmations (`lgtm`, `perfect`, `looks good`…), emoji-only responses, and Claude Code slash commands (`/clear`, `/help`…).
 
 You can extend this list in `~/.promptiq/classifier.json`:
 
@@ -142,7 +139,7 @@ You can extend this list in `~/.promptiq/classifier.json`:
 
 Set `excludeDefaults: true` to disable all built-in patterns and use only the patterns you supply.
 
-The minimum length threshold (default: 11 characters) provides a final safety net.
+The minimum length threshold (default: 10 characters) provides a final safety net.
 
 ### Web Dashboard
 
@@ -225,20 +222,22 @@ promptiq rubric   # opens in $EDITOR
 
 ```
 src/
-├── cli.ts          Entry point; commander command registration
-├── logger.ts       JSONL append; path helpers; silent error handling
-├── analyzer.ts     Claude API batch scoring; tool-use extraction; synthesis
-├── drm.ts          DRM rollup logic; weekly/monthly compression; ISO week math
-├── classifier.ts   Control-prompt detection; regex matching
-├── rubric.ts       rubric.md loading; embedded fallback defaults
-├── renderer.ts     Terminal output; chalk formatting; badge rendering
-├── server.ts       HTTP server; embedded dashboard HTML/CSS/JS; REST API
-├── mcp.ts          MCP stdio server; alternative integration surface for Claude Code
-└── types.ts        Shared TypeScript interfaces (LogEntry, DayAnalysis, etc.)
+├── cli.ts              Entry point; commander command registration
+├── logger.ts           JSONL append; path helpers; silent error handling
+├── analyzer.ts         Claude API batch scoring; tool-use extraction; synthesis
+├── drm.ts              DRM rollup logic; weekly/monthly compression; ISO week math
+├── classifier.ts       Control-prompt detection; regex matching
+├── rubric.ts           rubric.md loading; embedded fallback defaults
+├── renderer.ts         Terminal output; chalk formatting; badge rendering
+├── server.ts           HTTP server; embedded dashboard HTML/CSS/JS; REST API
+├── spot-analyzer.ts    Single-prompt analyzer backing the Analyzer tab
+├── mcp.ts              MCP stdio server for Claude Code integration
+├── diff-util.ts        Utility helpers for diff display
+└── types.ts            Shared TypeScript interfaces (LogEntry, DayAnalysis, etc.)
 
 ~/.promptiq/
 ├── daily/          YYYY-MM-DD.jsonl    (raw prompt log)
-├── weekly/         YYYY-WNN.json       (compressed weekly records)
+├── weekly/         YYYY-Www.json       (compressed weekly records)
 ├── monthly/        YYYY-MM.json        (aggregated monthly summaries)
 ├── rubric.md                           (user-editable scoring criteria)
 └── classifier.json                     (custom control-prompt patterns)
@@ -466,7 +465,7 @@ All data is local to `~/.promptiq/`. No cloud sync, no telemetry, no external da
 {"timestamp":"2026-04-14T16:02:00Z","prompt":"ok"}
 ```
 
-**Weekly analysis record** (`~/.promptiq/weekly/YYYY-WNN.json`) — JSON, one file per ISO week:
+**Weekly analysis record** (`~/.promptiq/weekly/YYYY-Www.json`) — JSON, one file per ISO week:
 ```json
 {
   "week": "2026-W15",
